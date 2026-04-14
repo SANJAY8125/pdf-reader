@@ -7,7 +7,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
-import { BookOpen, FileText, Brain, WifiOff, X, ChevronLeft, Plus, Clock } from 'lucide-react-native';
+import { BookOpen, FileText, Brain, WifiOff, X, ChevronLeft, Plus, Clock, Moon, Sun } from 'lucide-react-native';
 import PdfViewer from './src/PdfViewer';
 import { checkNetwork, explainWithAI, lookupWord } from './src/api';
 import { getHistory, saveToHistory, getLastSession, setLastSession } from './src/storage';
@@ -44,6 +44,7 @@ export default function App() {
   const [totalPages, setTotalPages] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
   const [isAppReady, setIsAppReady] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   // AI Modal Replacement
   const [modalVisible, setModalVisible] = useState(false);
@@ -284,11 +285,6 @@ export default function App() {
                     {getFilename(item.name)}
                   </Text>
                   <View style={styles.cardMeta}>
-                    {item.totalPages > 0 && (
-                      <Text style={styles.cardPage}>
-                        Page {item.lastPage || 1} of {item.totalPages}
-                      </Text>
-                    )}
                     {item.lastAccessed && (
                       <View style={styles.cardTimeRow}>
                         <Clock color="#525870" size={11} />
@@ -296,14 +292,6 @@ export default function App() {
                       </View>
                     )}
                   </View>
-                  {item.totalPages > 0 && (
-                    <View style={styles.progressBarBg}>
-                      <View style={[
-                        styles.progressBarFill,
-                        { width: `${Math.min(100, ((item.lastPage || 1) / item.totalPages) * 100)}%` }
-                      ]} />
-                    </View>
-                  )}
                 </View>
               </TouchableOpacity>
             )}
@@ -326,6 +314,7 @@ export default function App() {
       <PdfViewer
         uri={activePdf?.uri}
         initialPage={activePdf?.initialPage || 1}
+        isDarkMode={isDarkMode}
         onAction={handleAction}
         onCopy={handleCopy}
         onProgress={onProgress}
@@ -340,7 +329,9 @@ export default function App() {
           <Text style={styles.readerTitle} numberOfLines={1}>
             {getFilename(activePdf?.name)}
           </Text>
-          <View style={{ width: 26 }} />
+          <TouchableOpacity onPress={() => setIsDarkMode(!isDarkMode)} style={styles.themeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            {isDarkMode ? <Sun color="#FFF" size={20} /> : <Moon color="#FFF" size={20} />}
+          </TouchableOpacity>
         </View>
       )}
 
@@ -476,7 +467,8 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 0, left: 0, right: 0,
     zIndex: 100,
   },
-  backBtn: { padding: 4, marginRight: 8 },
+  backBtn: { padding: 4, width: 34, alignItems: 'center' },
+  themeBtn: { padding: 4, width: 34, alignItems: 'center' },
   readerTitle: { flex: 1, color: '#F0F2FF', fontSize: 16, fontWeight: '700', textAlign: 'center' },
   
   floatingPageNum: {
