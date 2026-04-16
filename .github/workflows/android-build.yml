@@ -33,7 +33,7 @@ jobs:
         run: npm install
 
       - name: Install Expo CLI and EAS CLI
-        run: npm install -g expo-cli eas-cli
+        run: npm install -g expo-cli eas-cli@latest
 
       - name: Run EAS Build for Android
         id: eas-build
