@@ -14,32 +14,32 @@ const buildHtml = () => `
     html, body {
       margin: 0;
       padding: 0;
-      background-color: #121212;
-      color: #fff;
+      background-color: #E5E7EB;
       overflow-x: hidden;
       font-family: sans-serif;
+      transition: background-color 0.3s;
     }
     #pdf-container {
       width: 100%;
       display: flex;
       flex-direction: column;
       align-items: center;
+      transition: filter 0.3s;
     }
     .page {
       width: 100%;
       margin-bottom: 4px;
       position: relative;
-      background: #1a1a1a;
+      background: #FFFFFF;
     }
     
     .page-placeholder {
       position: absolute;
       top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      color: #525870;
+      color: #9CA3AF;
       font-size: 18px;
       font-weight: 600;
-      font-family: sans-serif;
       pointer-events: none;
     }
     
@@ -73,20 +73,9 @@ const buildHtml = () => `
       align-items: center;
       box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     }
-    #scroll-thumb:active {
-      background: rgba(50, 55, 70, 0.95);
-    }
-    .thumb-dots {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 3px;
-    }
-    .thumb-dot {
-      width: 3px;
-      height: 3px;
-      background: #A0AABF;
-      border-radius: 50%;
-    }
+    #scroll-thumb:active { background: rgba(50, 55, 70, 0.95); }
+    .thumb-dots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+    .thumb-dot { width: 3px; height: 3px; background: #A0AABF; border-radius: 50%; }
     
     canvas { display: block; }
     .textLayer {
@@ -138,12 +127,7 @@ const buildHtml = () => `
     .ai-btn.copy  { color: #A0AABF; }
     .ai-btn.ai    { color: #4B7BFF; }
     .ai-btn.dict  { color: #C084FC; }
-    .ai-divider {
-      width: 1px;
-      height: 22px;
-      background: #2E3350;
-      margin: 0 2px;
-    }
+    .ai-divider { width: 1px; height: 22px; background: #2E3350; margin: 0 2px; }
   </style>
 </head>
 <body oncontextmenu="return false;">
@@ -164,50 +148,31 @@ const buildHtml = () => `
     <button class="ai-btn dict" title="Meaning" onmousedown="handleBtn(event,'dict')" ontouchstart="handleBtn(event,'dict')">&#x1F4D6;</button>
   </div>
   <script>
-    function postRN(data) {
-      window.ReactNativeWebView.postMessage(JSON.stringify(data));
-    }
+    function postRN(data) { window.ReactNativeWebView.postMessage(JSON.stringify(data)); }
 
-    window.onerror = function(msg, src, line) {
-      postRN({ type: 'log', message: 'Error: ' + msg + ' at ' + line });
-    };
+    window.onerror = function(msg, src, line) { postRN({ type: 'log', message: 'Error: ' + msg + ' at ' + line }); };
 
     if (typeof pdfjsLib === 'undefined') {
       postRN({ type: 'log', message: 'pdfjsLib undefined - CDN failed!' });
     } else {
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
       postRN({ type: 'ready' });
     }
 
+    // Modern CSS Filter Dark Mode approach
     window.isDarkMode = false;
     window.setDarkMode = function(val) {
       if (window.isDarkMode === val) return;
       window.isDarkMode = val;
-      
       const container = document.getElementById('pdf-container');
       if (!container) return;
       
-      const divs = container.querySelectorAll('.page');
-      
-      // Stop rendering current queue
-      if (typeof renderQueue !== 'undefined') {
-        renderQueue.clear();
-        isRendering = false;
-      }
-      
-      // Clear all canvases and reset placeholder
-      divs.forEach(div => {
-        div.dataset.rendered = '';
-        div.innerHTML = '<div class="page-placeholder">Page ' + div.dataset.pageNum + '</div>';
-        if (typeof observer !== 'undefined') observer.unobserve(div);
-      });
-      
-      // Re-observe to trigger immediate render on visible ones
-      if (typeof observer !== 'undefined') {
-        divs.forEach(div => {
-          observer.observe(div);
-        });
+      if (val) {
+        document.body.style.backgroundColor = '#0C0E14';
+        container.style.filter = 'invert(90%) hue-rotate(180deg) brightness(85%) contrast(90%)';
+      } else {
+        document.body.style.backgroundColor = '#E5E7EB';
+        container.style.filter = 'none';
       }
     };
 
@@ -215,14 +180,12 @@ const buildHtml = () => `
     let totalPages = 0;
     const container = document.getElementById('pdf-container');
 
-    // ── Page tracking & Scrollbar ──
     let lastReportedPage = 0;
 
     function getCurrentPage() {
       const viewportMid = window.scrollY + window.innerHeight / 2;
       const divs = container.querySelectorAll('.page');
-      let best = 1;
-      let bestDist = Infinity;
+      let best = 1, bestDist = Infinity;
       divs.forEach(div => {
         const mid = div.offsetTop + div.offsetHeight / 2;
         const dist = Math.abs(viewportMid - mid);
@@ -236,10 +199,7 @@ const buildHtml = () => `
 
     const customScrollbar = document.getElementById('custom-scrollbar');
     const scrollThumb = document.getElementById('scroll-thumb');
-    let isDraggingThumb = false;
-    let dragStartY = 0;
-    let dragStartProgress = 0;
-    let scrollbarHideTimer = null;
+    let isDraggingThumb = false, dragStartY = 0, dragStartProgress = 0, scrollbarHideTimer = null;
 
     function getScrollMax() { return document.documentElement.scrollHeight - window.innerHeight; }
     function getThumbMax() { return customScrollbar.clientHeight - scrollThumb.clientHeight; }
@@ -247,21 +207,13 @@ const buildHtml = () => `
     function updateThumbPosition() {
       if (isDraggingThumb) return;
       const scrollMax = getScrollMax();
-      if (scrollMax <= 0) {
-        customScrollbar.style.display = 'none';
-        return;
-      }
+      if (scrollMax <= 0) { customScrollbar.style.display = 'none'; return; }
       customScrollbar.style.display = 'block';
       customScrollbar.style.opacity = '1';
-      
-      const thumbMax = getThumbMax();
       const progress = window.scrollY / scrollMax;
-      scrollThumb.style.top = (progress * thumbMax) + 'px';
-
+      scrollThumb.style.top = (progress * getThumbMax()) + 'px';
       clearTimeout(scrollbarHideTimer);
-      scrollbarHideTimer = setTimeout(() => {
-        if (!isDraggingThumb) customScrollbar.style.opacity = '0';
-      }, 1500);
+      scrollbarHideTimer = setTimeout(() => { if (!isDraggingThumb) customScrollbar.style.opacity = '0'; }, 1500);
     }
 
     scrollThumb.addEventListener('touchstart', (e) => {
@@ -277,33 +229,22 @@ const buildHtml = () => `
       if (!isDraggingThumb) return;
       e.preventDefault();
       const deltaY = e.touches[0].clientY - dragStartY;
-      const thumbMax = getThumbMax();
-      
-      let moveRatio = deltaY / thumbMax;
-      let progress = dragStartProgress + moveRatio;
-      if (progress < 0) progress = 0;
-      if (progress > 1) progress = 1;
-      
+      let progress = dragStartProgress + (deltaY / getThumbMax());
+      if (progress < 0) progress = 0; if (progress > 1) progress = 1;
       const targetPage = Math.round(progress * (totalPages - 1)) + 1;
       if (targetPage !== window._lastScrubPage) {
         window._lastScrubPage = targetPage;
         const div = container.querySelector('[data-page-num="' + targetPage + '"]');
-        if (div) {
-           window.scrollTo(0, div.offsetTop);
-        }
+        if (div) window.scrollTo(0, div.offsetTop);
       }
-      
-      scrollThumb.style.top = (progress * thumbMax) + 'px';
-
+      scrollThumb.style.top = (progress * getThumbMax()) + 'px';
       checkAndReportProgress();
     }, {passive: false});
 
     document.addEventListener('touchend', () => {
       if (isDraggingThumb) {
         isDraggingThumb = false;
-        scrollbarHideTimer = setTimeout(() => {
-          customScrollbar.style.opacity = '0';
-        }, 1500);
+        scrollbarHideTimer = setTimeout(() => { customScrollbar.style.opacity = '0'; }, 1500);
       }
     });
 
@@ -327,39 +268,45 @@ const buildHtml = () => `
       }
     });
 
+    // Handle Orientation Resize safely. Re-render pages if layout completely changed.
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        const divs = container.querySelectorAll('.page');
+        divs.forEach(div => {
+           if (div.dataset.rendered) {
+             div.dataset.rendered = '';
+             div.innerHTML = '<div class="page-placeholder">Page ' + div.dataset.pageNum + '</div>';
+             observer.observe(div);
+           }
+        });
+      }, 200);
+    });
+
     // ── Receive PDF data ──
-    window.receivePdfData = async function(b64Data, initialPage, startInDarkMode) {
+    window.receivePdfData = async function(b64Data, initialPage, startInDarkMode, startScrollY) {
       try {
         window.isDarkMode = !!startInDarkMode;
-        postRN({ type: 'log', message: 'Decoding base64...' });
+        window.setDarkMode(window.isDarkMode);
         const binary = atob(b64Data);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        postRN({ type: 'log', message: 'Loading PDF...' });
         const task = pdfjsLib.getDocument({ data: bytes });
         pdfDoc = await task.promise;
         totalPages = pdfDoc.numPages;
-        postRN({ type: 'log', message: 'PDF loaded. Pages: ' + totalPages });
         postRN({ type: 'total_pages', totalPages });
         container.innerHTML = '';
-        if (totalPages === 1) {
-          container.style.minHeight = '100vh';
-          container.style.justifyContent = 'center';
-        } else {
-          container.style.minHeight = 'auto';
-          container.style.justifyContent = 'flex-start';
-        }
-        await buildPlaceholders(initialPage || 1);
+        container.style.justifyContent = totalPages === 1 ? 'center' : 'flex-start';
+        await buildPlaceholders(initialPage || 1, startScrollY);
       } catch(e) {
         postRN({ type: 'log', message: 'receivePdfData error: ' + e.message });
       }
     };
 
-    // ── Build lazy placeholders ──
-    async function buildPlaceholders(initialPage) {
+    async function buildPlaceholders(initialPage, startScrollY) {
       try {
         const firstPage = await pdfDoc.getPage(1);
-        // Scale=1 natural size to get correct aspect ratio
         const vp = firstPage.getViewport({ scale: 1 });
         const ratio = vp.height / vp.width;
 
@@ -367,8 +314,7 @@ const buildHtml = () => `
           const div = document.createElement('div');
           div.className = 'page';
           div.dataset.pageNum = i;
-          div.style.width = '100%';
-          div.style.paddingTop = (ratio * 100) + '%'; // aspect-ratio placeholder
+          div.style.paddingTop = (ratio * 100) + '%'; 
           div.innerHTML = '<div class="page-placeholder">Page ' + i + '</div>';
           container.appendChild(div);
           observer.observe(div);
@@ -376,15 +322,16 @@ const buildHtml = () => `
 
         postRN({ type: 'done_loading' });
 
-        // Restore position after placeholders are in DOM
-        if (initialPage && initialPage > 1) {
-          requestAnimationFrame(() => {
-            setTimeout(() => scrollToPage(initialPage), 100);
-          });
-        }
-      } catch(e) {
-        postRN({ type: 'log', message: 'buildPlaceholders error: ' + e.message });
-      }
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            if (startScrollY && startScrollY > 0) {
+              window.scrollTo({ top: startScrollY, behavior: 'instant' });
+            } else if (initialPage && initialPage > 1) {
+              scrollToPage(initialPage);
+            }
+          }, 150);
+        });
+      } catch(e) {}
     }
 
     function scrollToPage(pageNum) {
@@ -396,7 +343,6 @@ const buildHtml = () => `
       }
     }
 
-    // ── IntersectionObserver for lazy rendering ──
     let renderQueue = new Set();
     let isRendering = false;
 
@@ -408,9 +354,7 @@ const buildHtml = () => `
             renderQueue.add(num);
             processRenderQueue();
           }
-        } else {
-          renderQueue.delete(num);
-        }
+        } else { renderQueue.delete(num); }
       });
     }, { root: null, rootMargin: '100% 0px' });
 
@@ -419,17 +363,12 @@ const buildHtml = () => `
       isRendering = true;
       while (renderQueue.size > 0) {
         const currentPg = getCurrentPage();
-        let bestNum = -1;
-        let bestDist = Infinity;
+        let bestNum = -1, bestDist = Infinity;
         for (let num of renderQueue) {
           const dist = Math.abs(num - currentPg);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestNum = num;
-          }
+          if (dist < bestDist) { bestDist = dist; bestNum = num; }
         }
         if (bestNum === -1) break;
-        
         renderQueue.delete(bestNum);
         const div = container.querySelector('[data-page-num="' + bestNum + '"]');
         if (div && !div.dataset.rendered) {
@@ -444,35 +383,35 @@ const buildHtml = () => `
       try {
         const page = await pdfDoc.getPage(num);
         const dpr = window.devicePixelRatio || 1;
-
         const naturalVp = page.getViewport({ scale: 1 });
         const cssScale = window.innerWidth / naturalVp.width;
-
+        
         const cssViewport = page.getViewport({ scale: cssScale });
         const renderViewport = page.getViewport({ scale: cssScale * dpr });
-
-        const cssW = Math.round(cssViewport.width);
-        const cssH = Math.round(cssViewport.height);
-
-        // Render completely offscreen first
+        
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         canvas.width  = renderViewport.width;
         canvas.height = renderViewport.height;
-        canvas.style.width  = cssW + 'px';
-        canvas.style.height = cssH + 'px';
-        canvas.style.display = 'block';
+        canvas.style.position = 'absolute';
+        canvas.style.top = '0';
+        canvas.style.left = '0';
+        canvas.style.width  = '100%';
+        canvas.style.height = '100%';
         
-        let renderParams = { canvasContext: ctx, viewport: renderViewport };
-        if (window.isDarkMode) {
-           renderParams.pageColors = { background: '#000000', foreground: '#ffffff' };
-        }
-        await page.render(renderParams).promise;
+        await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
 
         const textDiv = document.createElement('div');
         textDiv.className = 'textLayer';
-        textDiv.style.width  = cssW + 'px';
-        textDiv.style.height = cssH + 'px';
+        textDiv.style.width  = Math.round(cssViewport.width) + 'px';
+        textDiv.style.height = Math.round(cssViewport.height) + 'px';
+        
+        // Ensure text layer scales with the absolute positioned responsive div!
+        textDiv.style.position = 'absolute';
+        textDiv.style.top = '0';
+        textDiv.style.left = '0';
+        textDiv.style.transform = 'scale(' + (window.innerWidth / Math.round(cssViewport.width)) + ')';
+        textDiv.style.transformOrigin = '0 0';
 
         const textContent = await page.getTextContent();
         pdfjsLib.renderTextLayer({
@@ -483,24 +422,16 @@ const buildHtml = () => `
           enhanceTextSelection: true
         });
 
-        // Swap out placeholder instantly with rendered content
-        div.style.paddingTop = '0';
-        div.style.width  = cssW + 'px';
-        div.style.height = cssH + 'px';
-        div.style.position = 'relative';
-        div.innerHTML = ''; // remove placeholder
+        div.innerHTML = ''; 
         div.appendChild(canvas);
         div.appendChild(textDiv);
-      } catch(e) {
-        postRN({ type: 'log', message: 'renderPage ' + num + ' error: ' + e.message });
-      }
+      } catch(e) {}
     }
 
-    // ── AI toolbar ──
     const toolbar = document.getElementById('ai-toolbar');
 
     function handleBtn(event, actionType) {
-      event.preventDefault(); // keep selection alive
+      event.preventDefault(); 
       event.stopPropagation();
       const sel = window.getSelection();
       const text = sel ? sel.toString().trim() : '';
@@ -528,32 +459,23 @@ const buildHtml = () => `
             const hasSpace = text.indexOf(' ') !== -1 || text.indexOf('\\n') !== -1;
             dictBtn.style.display = hasSpace ? 'none' : 'flex';
           }
-
           const range = sel.getRangeAt(0);
           const rect = range.getBoundingClientRect();
           toolbar.style.display = 'flex';
-          // Position toolbar just above selection
           let top = rect.top - toolbar.offsetHeight - 10;
           if (top < 8) top = rect.bottom + 10;
           let left = rect.left + rect.width / 2 - toolbar.offsetWidth / 2;
           if (left < 8) left = 8;
-          if (left + toolbar.offsetWidth > window.innerWidth - 8)
-            left = window.innerWidth - toolbar.offsetWidth - 8;
+          if (left + toolbar.offsetWidth > window.innerWidth - 8) left = window.innerWidth - toolbar.offsetWidth - 8;
           toolbar.style.top = top + 'px';
           toolbar.style.left = left + 'px';
         }, 300);
-      } else {
-        toolbar.style.display = 'none';
-      }
+      } else { toolbar.style.display = 'none'; }
     });
 
-    // Detect taps to toggle immersive reading mode
     document.addEventListener('click', (e) => {
-      // If we just clicked without a text selection, toggle header
       const sel = window.getSelection();
-      if (!sel || sel.toString().trim().length === 0) {
-        postRN({ type: 'tap' });
-      }
+      if (!sel || sel.toString().trim().length === 0) postRN({ type: 'tap' });
     });
 
     document.addEventListener('scroll', () => { toolbar.style.display = 'none'; });
@@ -562,7 +484,7 @@ const buildHtml = () => `
 </html>
 `;
 
-export default function PdfViewer({ uri, initialPage = 1, isDarkMode = false, onAction, onCopy, onProgress }) {
+export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDarkMode = false, onAction, onCopy, onProgress }) {
   const webviewRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [statusText, setStatusText] = useState('Initializing...');
@@ -581,28 +503,26 @@ export default function PdfViewer({ uri, initialPage = 1, isDarkMode = false, on
       setStatusText('Reading file...');
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
       setStatusText('Sending to viewer...');
-      const script = `
+      const script = \`
         try {
-          window.receivePdfData("${base64}", ${initialPage}, ${isDarkMode});
-        } catch(e) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type:'log', message:'inject error: '+e.message }));
-        }
+          window.receivePdfData("\${base64}", \${initialPage}, \${isDarkMode}, \${startScrollY});
+        } catch(e) {}
         true;
-      `;
+      \`;
       webviewRef.current?.injectJavaScript(script);
     } catch (err) {
       setStatusText('Error: ' + err.message);
     }
-  }, [uri, initialPage]);
+  }, [uri, initialPage, startScrollY]); // Intentionally omitting isDarkMode to prevent complete reload during theme toggle
 
   useEffect(() => {
     if (!loading) {
-      webviewRef.current?.injectJavaScript(`
+      webviewRef.current?.injectJavaScript(\`
         if (typeof window.setDarkMode === 'function') {
-          window.setDarkMode(${isDarkMode});
+          window.setDarkMode(\${isDarkMode});
         }
         true;
-      `);
+      \`);
     }
   }, [isDarkMode, loading]);
 
@@ -610,7 +530,6 @@ export default function PdfViewer({ uri, initialPage = 1, isDarkMode = false, on
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'log') {
-        console.log('[WebView]', data.message);
         setStatusText(data.message);
       } else if (data.type === 'ready') {
         if (uri) loadPdf();
@@ -620,9 +539,6 @@ export default function PdfViewer({ uri, initialPage = 1, isDarkMode = false, on
         if (onProgress) onProgress({ totalPages: data.totalPages });
       } else if (data.type === 'progress') {
         if (onProgress) onProgress({ page: data.page, scrollY: data.scrollY });
-      } else if (data.type === 'selection' && data.text) {
-        lastSelectedText.current = data.text;
-        lastSelectedContext.current = data.context || '';
       } else if (data.type === 'action' && data.text) {
         if (onAction) onAction(data.action, data.text, data.context || '');
       } else if (data.type === 'copy_done' && data.text) {
@@ -630,9 +546,7 @@ export default function PdfViewer({ uri, initialPage = 1, isDarkMode = false, on
       } else if (data.type === 'tap') {
         if (onAction) onAction('tap', '', '');
       }
-    } catch (e) {
-      console.log('message parse error', e);
-    }
+    } catch (e) {}
   }, [uri, loadPdf, onProgress, onAction, onCopy]);
 
   return (

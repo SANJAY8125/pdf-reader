@@ -35,7 +35,7 @@ export const saveToHistory = async (pdfObj) => {
   } else {
     history.unshift(entry);
   }
-  await writeJSON(HISTORY_FILE, history.slice(0, 20));
+  await writeJSON(HISTORY_FILE, history.slice(0, 20)); // Keep last 20
 };
 
 export const getLastSession = async () => {

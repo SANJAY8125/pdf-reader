@@ -1,22 +1,21 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, SafeAreaView,
-  ActivityIndicator, Modal, ScrollView, FlatList,
-  BackHandler, StatusBar as RNStatusBar, Platform, Animated, Easing
+  ActivityIndicator, ScrollView, FlatList,
+  BackHandler, StatusBar as RNStatusBar, Platform, Animated
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
-import { BookOpen, FileText, Brain, WifiOff, X, ChevronLeft, Plus, Clock, Moon, Sun } from 'lucide-react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import { BookOpen, FileText, Brain, WifiOff, X, ChevronLeft, Plus, Clock, Moon, Sun, MonitorSmartphone } from 'lucide-react-native';
 import PdfViewer from './src/PdfViewer';
 import { checkNetwork, explainWithAI, lookupWord } from './src/api';
 import { getHistory, saveToHistory, getLastSession, setLastSession } from './src/storage';
 
-// ─── Screen constants ───────────────────────────────────────────────────────
 const SCREEN_HOME = 'home';
 const SCREEN_READER = 'reader';
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
 function formatDate(ts) {
   if (!ts) return '';
   const d = new Date(ts);
@@ -33,28 +32,28 @@ function getFilename(name) {
   return name.replace(/\.pdf$/i, '');
 }
 
-// ─── App ────────────────────────────────────────────────────────────────────
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? RNStatusBar.currentHeight || 24 : 0;
 
 export default function App() {
   const [screen, setScreen] = useState(SCREEN_HOME);
   const [history, setHistory] = useState([]);
-  const [activePdf, setActivePdf] = useState(null); // { uri, name, initialPage }
+  const [activePdf, setActivePdf] = useState(null); // { uri, name, initialPage, scrollY }
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
+  const [currentScrollY, setCurrentScrollY] = useState(0);
+  
   const [isOnline, setIsOnline] = useState(true);
   const [isAppReady, setIsAppReady] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
-  // AI Modal Replacement
+  // AI Modal
   const [modalVisible, setModalVisible] = useState(false);
   const [resultTitle, setResultTitle] = useState('');
   const [resultContent, setResultContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [refineContext, setRefineContext] = useState(null);
   
-  // Custom Bottom Sheet Animation
-  const slideAnim = useRef(new Animated.Value(1000)).current; // starts offscreen
+  const slideAnim = useRef(new Animated.Value(1000)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current; 
   
   const openModal = () => {
@@ -75,14 +74,10 @@ export default function App() {
     });
   };
 
-  // Immersive reading mode
   const [showHeader, setShowHeader] = useState(false);
-
-  // Copy toast
   const [copyToast, setCopyToast] = useState(false);
   const copyToastTimer = useRef(null);
 
-  // ── On app start: restore last session & load history ────────────────────
   useEffect(() => {
     async function init() {
       checkNetwork().then(setIsOnline);
@@ -91,8 +86,14 @@ export default function App() {
 
       const session = await getLastSession();
       if (session?.uri) {
-        setActivePdf({ uri: session.uri, name: session.name, initialPage: session.lastPage || 1 });
+        setActivePdf({ 
+          uri: session.uri, 
+          name: session.name, 
+          initialPage: session.lastPage || 1,
+          startScrollY: session.scrollY || 0 
+        });
         setCurrentPage(session.lastPage || 1);
+        setCurrentScrollY(session.scrollY || 0);
         setTotalPages(session.totalPages || 0);
         setScreen(SCREEN_READER);
       }
@@ -101,7 +102,6 @@ export default function App() {
     init();
   }, []);
 
-  // ── Android back button ───────────────────────────────────────────────────
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
       if (screen === SCREEN_READER) {
@@ -113,33 +113,54 @@ export default function App() {
     return () => handler.remove();
   }, [screen]);
 
-  // ── Navigation ────────────────────────────────────────────────────────────
+  const toggleOrientation = async () => {
+    try {
+      const orientation = await ScreenOrientation.getOrientationAsync();
+      if (
+        orientation === ScreenOrientation.Orientation.PORTRAIT_UP || 
+        orientation === ScreenOrientation.Orientation.PORTRAIT_DOWN || 
+        orientation === ScreenOrientation.Orientation.UNKNOWN
+      ) {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
+      } else {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      }
+    } catch {}
+  };
+
   const openPdf = useCallback(async (pdfEntry) => {
     const entry = {
       uri: pdfEntry.uri,
       name: pdfEntry.name,
       initialPage: pdfEntry.lastPage || 1,
+      startScrollY: pdfEntry.scrollY || 0,
     };
     setActivePdf(entry);
     setCurrentPage(entry.initialPage);
+    setCurrentScrollY(entry.startScrollY);
     setTotalPages(pdfEntry.totalPages || 0);
     setScreen(SCREEN_READER);
+    setShowHeader(false);
 
     await setLastSession({
       uri: pdfEntry.uri,
       name: pdfEntry.name,
       lastPage: entry.initialPage,
       totalPages: pdfEntry.totalPages || 0,
+      scrollY: entry.startScrollY,
     });
   }, []);
 
   const goHome = useCallback(async () => {
     setScreen(SCREEN_HOME);
+    setShowHeader(false);
+    try {
+       await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    } catch {}
     const hist = await getHistory();
     setHistory(hist);
   }, []);
 
-  // ── Pick a new PDF from device ────────────────────────────────────────────
   const pickDocument = useCallback(async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -152,6 +173,7 @@ export default function App() {
           uri: asset.uri,
           name: asset.name || 'Unknown PDF',
           lastPage: 1,
+          scrollY: 0,
           totalPages: 0,
           lastAccessed: Date.now(),
         };
@@ -163,23 +185,23 @@ export default function App() {
     }
   }, [openPdf]);
 
-  // ── Track reading progress ────────────────────────────────────────────────
   const onProgress = useCallback(async ({ page, scrollY, totalPages: tp }) => {
     if (!activePdf) return;
     if (tp) setTotalPages(tp);
     if (page) setCurrentPage(page);
+    if (scrollY !== undefined) setCurrentScrollY(scrollY);
 
     const updatedEntry = {
       uri: activePdf.uri,
       name: activePdf.name,
       lastPage: page || currentPage,
       totalPages: tp || totalPages,
+      scrollY: scrollY !== undefined ? scrollY : currentScrollY,
     };
     await saveToHistory(updatedEntry);
     await setLastSession(updatedEntry);
-  }, [activePdf, currentPage, totalPages]);
+  }, [activePdf, currentPage, totalPages, currentScrollY]);
 
-  // ── Copy handler ──────────────────────────────────────────────────────────
   const handleCopy = useCallback(async (text) => {
     try { await Clipboard.setStringAsync(text); } catch (e) {}
     clearTimeout(copyToastTimer.current);
@@ -187,7 +209,6 @@ export default function App() {
     copyToastTimer.current = setTimeout(() => setCopyToast(false), 2000);
   }, []);
 
-  // ── AI Actions ────────────────────────────────────────────────────────────
   const handleAction = useCallback(async (actionType, text, contextText) => {
     if (actionType === 'tap') {
       setShowHeader(prev => !prev);
@@ -208,15 +229,12 @@ export default function App() {
     setRefineContext(null);
     const online = await checkNetwork();
     setIsOnline(online);
-    if (online) {
-      try {
-        const res = await explainWithAI(text, contextText);
-        setResultContent(res);
-      } catch (error) {
-        setResultContent(error.message || 'Could not fetch explanation. Check your internet connection.');
-      }
-    } else {
-      handleDictionary(text, contextText, false);
+    
+    try {
+      const res = await explainWithAI(text, contextText);
+      setResultContent(res);
+    } catch (error) {
+       setResultContent(error.message || 'Could not fetch explanation.');
     }
     setIsLoading(false);
   };
@@ -224,17 +242,14 @@ export default function App() {
   const handleDictionary = async (text, contextText, canRefine) => {
     openModal();
     setIsLoading(true);
-    const firstWord = text.split(' ')[0];
-    setResultTitle(firstWord);
+    const firstWord = text.split(/[ \n]/)[0].replace(/[^a-zA-Z]/g, '');
+    setResultTitle(firstWord || "Dictionary");
     const meaning = await lookupWord(firstWord);
     setResultContent(meaning);
     if (canRefine) setRefineContext({ text: firstWord, contextText });
     setIsLoading(false);
   };
 
-
-
-  // ── Render loading splash ─────────────────────────────────────────────────
   if (!isAppReady) {
     return (
       <View style={styles.splash}>
@@ -245,7 +260,6 @@ export default function App() {
     );
   }
 
-  // ── Home Screen ───────────────────────────────────────────────────────────
   if (screen === SCREEN_HOME) {
     return (
       <SafeAreaView style={styles.container}>
@@ -287,8 +301,11 @@ export default function App() {
                   <View style={styles.cardMeta}>
                     {item.lastAccessed && (
                       <View style={styles.cardTimeRow}>
-                        <Clock color="#525870" size={11} />
-                        <Text style={styles.cardTime}>{formatDate(item.lastAccessed)}</Text>
+                         <BookOpen color="#525870" size={11} />
+                         <Text style={styles.cardTime}>Page {item.lastPage || 1}</Text>
+                         <Text style={{color:'#2C2F40', marginHorizontal: 4}}>•</Text>
+                         <Clock color="#525870" size={11} />
+                         <Text style={styles.cardTime}>{formatDate(item.lastAccessed)}</Text>
                       </View>
                     )}
                   </View>
@@ -298,7 +315,6 @@ export default function App() {
           />
         )}
 
-        {/* FAB */}
         <TouchableOpacity style={styles.fab} onPress={pickDocument} activeOpacity={0.85}>
           <Plus color="#FFF" size={28} />
         </TouchableOpacity>
@@ -306,21 +322,19 @@ export default function App() {
     );
   }
 
-  // ── Reader Screen ─────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <StatusBar style="light" hidden={!showHeader} />
-
       <PdfViewer
         uri={activePdf?.uri}
         initialPage={activePdf?.initialPage || 1}
+        startScrollY={activePdf?.startScrollY || 0}
         isDarkMode={isDarkMode}
         onAction={handleAction}
         onCopy={handleCopy}
         onProgress={onProgress}
       />
 
-      {/* Minimal Header (Floating overlay) */}
       {showHeader && (
         <View style={[styles.readerHeader, { paddingTop: STATUSBAR_HEIGHT + 12 }]}>
           <TouchableOpacity onPress={goHome} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -329,13 +343,15 @@ export default function App() {
           <Text style={styles.readerTitle} numberOfLines={1}>
             {getFilename(activePdf?.name)}
           </Text>
+          <TouchableOpacity onPress={toggleOrientation} style={styles.themeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <MonitorSmartphone color="#FFF" size={20} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => setIsDarkMode(!isDarkMode)} style={styles.themeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             {isDarkMode ? <Sun color="#FFF" size={20} /> : <Moon color="#FFF" size={20} />}
           </TouchableOpacity>
         </View>
       )}
 
-      {/* Floating Page Number */}
       {showHeader && totalPages > 0 && (
          <View pointerEvents="none" style={[styles.floatingPageNum, { top: STATUSBAR_HEIGHT + 70 }]}>
             <Text style={styles.pageIndicator}>
@@ -344,8 +360,6 @@ export default function App() {
          </View>
       )}
 
-
-      {/* Custom Bottom Sheet (Fills Screen including Notch) */}
       {modalVisible && (
         <View style={styles.customModalContainer}>
           <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.65)', opacity: fadeAnim }]}>
@@ -388,7 +402,6 @@ export default function App() {
         </View>
       )}
 
-      {/* Copied toast */}
       {copyToast && (
         <View style={styles.copyToast} pointerEvents="none">
           <Text style={styles.copyToastText}>✓ Copied!</Text>
@@ -398,16 +411,10 @@ export default function App() {
   );
 }
 
-// ─── Styles ─────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  // Shared
   container: { flex: 1, backgroundColor: '#0C0E14' },
-
-  // Splash
   splash: { flex: 1, backgroundColor: '#0C0E14', justifyContent: 'center', alignItems: 'center' },
   splashTitle: { color: '#FFF', fontSize: 24, fontWeight: '700', marginTop: 16, letterSpacing: 0.5 },
-
-  // Home Header
   homeHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 20, paddingVertical: 18,
@@ -420,8 +427,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#2D1A1A', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20,
   },
   offlineText: { color: '#FF5252', fontSize: 11, fontWeight: '600' },
-
-  // Recent PDF list
   listContent: { padding: 16, gap: 12 },
   pdfCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
@@ -435,13 +440,8 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1 },
   cardName: { color: '#F0F2FF', fontSize: 15, fontWeight: '600', marginBottom: 5 },
   cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  cardPage: { color: '#4B7BFF', fontSize: 12, fontWeight: '500' },
   cardTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   cardTime: { color: '#525870', fontSize: 11 },
-  progressBarBg: { height: 3, backgroundColor: '#1E2231', borderRadius: 2, overflow: 'hidden' },
-  progressBarFill: { height: '100%', backgroundColor: '#4B7BFF', borderRadius: 2 },
-
-  // Empty state
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
   emptyIcon: {
     width: 96, height: 96, borderRadius: 48,
@@ -449,18 +449,14 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { color: '#E0E4FF', fontSize: 20, fontWeight: '700', marginBottom: 8 },
   emptySubtitle: { color: '#525870', fontSize: 14, textAlign: 'center', lineHeight: 22 },
-
-  // FAB
   fab: {
     position: 'absolute', bottom: 28, right: 24,
     backgroundColor: '#4B7BFF', width: 60, height: 60, borderRadius: 30,
     justifyContent: 'center', alignItems: 'center',
     elevation: 10, shadowColor: '#4B7BFF', shadowOpacity: 0.4, shadowRadius: 12,
   },
-
-  // Reader Header
   readerHeader: {
-    flexDirection: 'row', alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 12, paddingBottom: 14,
     backgroundColor: 'rgba(17, 19, 24, 0.95)',
     borderBottomWidth: 1, borderBottomColor: '#1C1F2A',
@@ -470,29 +466,20 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4, width: 34, alignItems: 'center' },
   themeBtn: { padding: 4, width: 34, alignItems: 'center' },
   readerTitle: { flex: 1, color: '#F0F2FF', fontSize: 16, fontWeight: '700', textAlign: 'center' },
-  
   floatingPageNum: {
-    position: 'absolute',
-    alignSelf: 'center',
+    position: 'absolute', alignSelf: 'center',
     backgroundColor: 'rgba(30, 34, 49, 0.85)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 14,
-    zIndex: 99,
+    paddingHorizontal: 12, paddingVertical: 5,
+    borderRadius: 14, zIndex: 99,
   },
-  pageIndicator: {
-    color: '#A0AABF', fontSize: 13, fontWeight: '600',
-  },
-
-  // Modal / Bottom sheet
+  pageIndicator: { color: '#A0AABF', fontSize: 13, fontWeight: '600' },
   customModalContainer: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 9999,
-    justifyContent: 'flex-end',
+    zIndex: 9999, justifyContent: 'flex-end',
   },
   bottomSheet: {
     backgroundColor: '#151820', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 20, maxHeight: '75%', minHeight: '35%',
+    padding: 20, maxHeight: '80%', minHeight: '35%',
   },
   sheetHandle: {
     width: 40, height: 4, backgroundColor: '#2C2F40',
@@ -512,20 +499,10 @@ const styles = StyleSheet.create({
     padding: 12, borderRadius: 10, marginTop: 16, justifyContent: 'center',
   },
   refineBtnText: { color: '#4B7BFF', fontSize: 14, fontWeight: '600' },
-
-  // Copy toast
   copyToast: {
-    position: 'absolute',
-    top: 80,
-    alignSelf: 'center',
+    position: 'absolute', top: 80, alignSelf: 'center',
     backgroundColor: 'rgba(75,123,255,0.92)',
-    borderRadius: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    elevation: 20,
-    shadowColor: '#4B7BFF',
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
+    borderRadius: 20, paddingHorizontal: 18, paddingVertical: 8,
   },
   copyToastText: { color: '#FFF', fontSize: 14, fontWeight: '700', letterSpacing: 0.3 },
 });
