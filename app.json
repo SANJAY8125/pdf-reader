@@ -26,6 +26,11 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "extra": {}
+    "extra": {
+      "eas": {
+        "projectId": "c77fc9bb-8ca9-4582-8fc9-26858acd4612"
+      }
+    },
+    "owner": "xyrofer"
   }
 }
