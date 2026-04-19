@@ -4,12 +4,14 @@ import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const GEMINI_API_KEY = Constants.expoConfig?.extra?.GEMINI_API_KEY || Constants.manifest?.extra?.GEMINI_API_KEY || process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+const GEMINI_API_KEY = Constants.expoConfig?.extra?.GEMINI_API_KEY || Constants.manifest?.extra?.GEMINI_API_KEY;
 
 // Memory caches
-const dictCache = new Map();
+let dictCacheMemory = null;
+let aiCacheMemory = null;
 let memoryDictionary = null; // Lazy loaded offline dictionary
 
+const DICT_CACHE_KEY = '@dict_cache';
 const AI_CACHE_KEY = '@ai_explanations_cache';
 const MAX_CACHE_SIZE = 100; // Limit AsyncStorage cache items
 
@@ -29,45 +31,23 @@ const getDictionary = async () => {
   }
 };
 
-export const lookupWord = async (word) => {
-  const cleanWord = word.trim().toLowerCase().replace(/[^a-z0-9]/gi, '');
-  if (!cleanWord) return "No text selected.";
-  
-  if (dictCache.has(cleanWord)) {
-    return dictCache.get(cleanWord);
+// Cache init
+const initCache = async () => {
+  if (aiCacheMemory === null) {
+    try {
+      const data = await AsyncStorage.getItem(AI_CACHE_KEY);
+      aiCacheMemory = data ? JSON.parse(data) : {};
+    } catch { aiCacheMemory = {}; }
   }
-
-  let result = "No definition found. Try AI explanation.";
-  const dict = await getDictionary();
-
-  if (dict && dict[cleanWord]) {
-    let rawMeaning = dict[cleanWord];
-    let formatted = rawMeaning.replace(/(?:\s+|^)(\d+\.)\s/g, '\n$1 ').trim();
-    const parts = formatted.split('\n');
-    result = parts[0].replace(/^\d+\.\s*/, '').trim();
-  }
-  
-  // LRU cache limit for memory dict cache
-  if (dictCache.size >= 500) {
-    const firstKey = dictCache.keys().next().value;
-    dictCache.delete(firstKey);
-  }
-  
-  dictCache.set(cleanWord, result);
-  return result;
-};
-
-// AsyncStorage Cache helpers
-const getAiCache = async () => {
-  try {
-    const data = await AsyncStorage.getItem(AI_CACHE_KEY);
-    return data ? JSON.parse(data) : {};
-  } catch {
-    return {};
+  if (dictCacheMemory === null) {
+    try {
+      const data = await AsyncStorage.getItem(DICT_CACHE_KEY);
+      dictCacheMemory = data ? JSON.parse(data) : {};
+    } catch { dictCacheMemory = {}; }
   }
 };
 
-const saveAiCache = async (cacheObj) => {
+const saveCache = async (key, cacheObj) => {
   try {
     const keys = Object.keys(cacheObj);
     if (keys.length > MAX_CACHE_SIZE) {
@@ -75,23 +55,47 @@ const saveAiCache = async (cacheObj) => {
       const toDelete = keys.slice(0, keys.length - MAX_CACHE_SIZE);
       toDelete.forEach(k => delete cacheObj[k]);
     }
-    await AsyncStorage.setItem(AI_CACHE_KEY, JSON.stringify(cacheObj));
+    await AsyncStorage.setItem(key, JSON.stringify(cacheObj));
   } catch (err) {
     console.error('AsyncStorage save error', err);
   }
 };
 
+export const lookupWord = async (word) => {
+  const cleanWord = word.trim().toLowerCase().replace(/[^a-z0-9]/gi, '');
+  if (!cleanWord) return "No text selected.";
+  
+  await initCache();
+  if (dictCacheMemory[cleanWord]) {
+    return dictCacheMemory[cleanWord];
+  }
+
+  let result = "No definition found. Try AI explanation.";
+  const dict = await getDictionary();
+
+  if (dict && dict[cleanWord]) {
+    let rawMeaning = dict[cleanWord];
+    result = rawMeaning.replace(/(?:\s+|^)(\d+\.)\s/g, '\n$1 ').trim();
+  }
+  
+  dictCacheMemory[cleanWord] = result;
+  // Fire and forget save
+  saveCache(DICT_CACHE_KEY, dictCacheMemory);
+  
+  return result;
+};
+
 export const explainWithAI = async (text, contextText = "") => {
   if (!text.trim()) throw new Error("No text selected.");
   
+  await initCache();
   const cacheKey = `${text}_${contextText}`;
-  const localCache = await getAiCache();
-  if (localCache[cacheKey]) {
-    return localCache[cacheKey];
+  if (aiCacheMemory[cacheKey]) {
+    return aiCacheMemory[cacheKey];
   }
 
   if (!GEMINI_API_KEY) {
-    throw new Error("Gemini API key is missing. Please configure it in app.json (extra) or .env.");
+    throw new Error("Gemini API key is missing. Please configure it in app.json or app.config.js (extra).");
   }
 
   // Optimize context to precisely surrounding sentences
@@ -156,8 +160,8 @@ Surrounding Context: "${trimmedContext}"`;
     const data = await makeRequest(2); // up to 2 retries
     const explanation = data.candidates[0].content.parts[0].text;
     
-    localCache[cacheKey] = explanation;
-    await saveAiCache(localCache);
+    aiCacheMemory[cacheKey] = explanation;
+    saveCache(AI_CACHE_KEY, aiCacheMemory); // fire and forget
     
     return explanation;
   } catch (error) {

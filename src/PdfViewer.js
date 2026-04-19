@@ -437,7 +437,19 @@ const buildHtml = () => `
       const text = sel ? sel.toString().trim() : '';
       toolbar.style.display = 'none';
       if (text.length === 0) return;
-      const ctx = sel.anchorNode?.parentElement?.textContent || '';
+      let ctx = '';
+      if (sel.anchorNode && sel.anchorNode.parentElement) {
+        let parent = sel.anchorNode.parentElement;
+        if (parent.parentElement && parent.parentElement.classList.contains('textLayer')) {
+           let children = Array.from(parent.parentElement.children);
+           let idx = children.indexOf(parent);
+           let start = Math.max(0, idx - 15);
+           let end = Math.min(children.length, idx + 15);
+           ctx = children.slice(start, end).map(n => n.textContent).join(' ');
+        } else {
+           ctx = parent.textContent;
+        }
+      }
       
       if (actionType === 'copy') {
         postRN({ type: 'copy_done', text });

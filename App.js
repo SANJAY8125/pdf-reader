@@ -244,8 +244,12 @@ export default function App() {
     setIsLoading(true);
     const firstWord = text.split(/[ \n]/)[0].replace(/[^a-zA-Z]/g, '');
     setResultTitle(firstWord || "Dictionary");
-    const meaning = await lookupWord(firstWord);
-    setResultContent(meaning);
+    try {
+      const meaning = await lookupWord(firstWord);
+      setResultContent(meaning);
+    } catch (error) {
+      setResultContent(error.message || 'Could not fetch dictionary.');
+    }
     if (canRefine) setRefineContext({ text: firstWord, contextText });
     setIsLoading(false);
   };
@@ -392,7 +396,7 @@ export default function App() {
                       onPress={() => handleExplain(refineContext.text, refineContext.contextText)}
                     >
                       <Brain color="#4B7BFF" size={15} />
-                      <Text style={styles.refineBtnText}>Refine with AI context</Text>
+                      <Text style={styles.refineBtnText}>Explain in this context (AI)</Text>
                     </TouchableOpacity>
                   )}
                 </View>
