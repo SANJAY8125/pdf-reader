@@ -170,10 +170,12 @@ const buildHtml = () => `
       if (!container) return;
       
       if (val) {
-        document.body.style.backgroundColor = '#0C0E14';
-        container.style.filter = 'invert(90%) hue-rotate(180deg) brightness(85%) contrast(90%)';
+        document.body.style.backgroundColor = '#000000';
+        container.style.backgroundColor = '#000000';
+        container.style.filter = 'invert(100%) hue-rotate(180deg) brightness(95%) contrast(105%)';
       } else {
         document.body.style.backgroundColor = '#E5E7EB';
+        container.style.backgroundColor = 'transparent';
         container.style.filter = 'none';
       }
     };
@@ -307,14 +309,21 @@ const buildHtml = () => `
         
         let ww = window.innerWidth;
         if (!ww || ww <= 0) ww = document.documentElement.clientWidth || window.screen.width || 400;
-        window.pdfBaseScale = ww / vp.width;
+        
+        let wh = window.innerHeight;
+        if (!wh || wh <= 0) wh = document.documentElement.clientHeight || window.screen.height || 800;
+        
+        const fitScale = ww / vp.width;
+        const isLandscape = ww > wh;
+        
+        const initScale = isLandscape ? Math.min(fitScale, 0.9) : Math.min(fitScale, 1.2);
 
         for (let i = 1; i <= pdfDoc.numPages; i++) {
           const div = document.createElement('div');
           div.className = 'page';
           div.dataset.pageNum = i;
-          div.style.width = Math.round(vp.width * window.pdfBaseScale) + 'px';
-          div.style.height = Math.round(vp.height * window.pdfBaseScale) + 'px';
+          div.style.width = Math.round(vp.width * initScale) + 'px';
+          div.style.height = Math.round(vp.height * initScale) + 'px';
           div.innerHTML = '<div class="page-placeholder">Page ' + i + '</div>';
           container.appendChild(div);
           observer.observe(div);
@@ -389,7 +398,16 @@ const buildHtml = () => `
         const dpr = window.devicePixelRatio || 1;
         const naturalVp = page.getViewport({ scale: 1 });
         
-        const cssScale = window.pdfBaseScale || (window.innerWidth / naturalVp.width);
+        const ww = window.innerWidth;
+        const wh = window.innerHeight;
+
+        const isLandscape = ww > wh;
+        const fitScale = ww / naturalVp.width;
+
+        const cssScale = isLandscape
+          ? Math.min(fitScale, 0.9)
+          : Math.min(fitScale, 1.2);
+        
         const cssViewport = page.getViewport({ scale: cssScale });
         
         div.style.width = Math.round(cssViewport.width) + 'px';
