@@ -7,11 +7,11 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
-import * as ScreenOrientation from 'expo-screen-orientation';
-import { BookOpen, FileText, Brain, WifiOff, X, ChevronLeft, Plus, Clock, Moon, Sun, MonitorSmartphone } from 'lucide-react-native';
+import { BookOpen, FileText, Brain, WifiOff, X, ChevronLeft, Plus, Clock, Moon, Sun, Smartphone, Monitor } from 'lucide-react-native';
 import PdfViewer from './src/PdfViewer';
 import { checkNetwork, explainWithAI, lookupWord } from './src/api';
 import { getHistory, saveToHistory, getLastSession, setLastSession } from './src/storage';
+import * as ScreenOrientation from 'expo-screen-orientation';
 
 const SCREEN_HOME = 'home';
 const SCREEN_READER = 'reader';
@@ -45,6 +45,7 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(true);
   const [isAppReady, setIsAppReady] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(false);
 
   // AI Modal
   const [modalVisible, setModalVisible] = useState(false);
@@ -113,21 +114,6 @@ export default function App() {
     return () => handler.remove();
   }, [screen]);
 
-  const toggleOrientation = async () => {
-    try {
-      const orientation = await ScreenOrientation.getOrientationAsync();
-      if (
-        orientation === ScreenOrientation.Orientation.PORTRAIT_UP || 
-        orientation === ScreenOrientation.Orientation.PORTRAIT_DOWN || 
-        orientation === ScreenOrientation.Orientation.UNKNOWN
-      ) {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
-      } else {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-      }
-    } catch {}
-  };
-
   const openPdf = useCallback(async (pdfEntry) => {
     const entry = {
       uri: pdfEntry.uri,
@@ -154,9 +140,8 @@ export default function App() {
   const goHome = useCallback(async () => {
     setScreen(SCREEN_HOME);
     setShowHeader(false);
-    try {
-       await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-    } catch {}
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    setIsLandscape(false);
     const hist = await getHistory();
     setHistory(hist);
   }, []);
@@ -254,6 +239,16 @@ export default function App() {
     setIsLoading(false);
   };
 
+  const toggleOrientation = async () => {
+    if (isLandscape) {
+      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      setIsLandscape(false);
+    } else {
+      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
+      setIsLandscape(true);
+    }
+  };
+
   if (!isAppReady) {
     return (
       <View style={styles.splash}>
@@ -347,11 +342,11 @@ export default function App() {
           <Text style={styles.readerTitle} numberOfLines={1}>
             {getFilename(activePdf?.name)}
           </Text>
-          <TouchableOpacity onPress={toggleOrientation} style={styles.themeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <MonitorSmartphone color="#FFF" size={20} />
-          </TouchableOpacity>
           <TouchableOpacity onPress={() => setIsDarkMode(!isDarkMode)} style={styles.themeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             {isDarkMode ? <Sun color="#FFF" size={20} /> : <Moon color="#FFF" size={20} />}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={toggleOrientation} style={styles.themeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            {isLandscape ? <Smartphone color="#FFF" size={20} /> : <Monitor color="#FFF" size={20} />}
           </TouchableOpacity>
         </View>
       )}

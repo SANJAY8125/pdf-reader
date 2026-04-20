@@ -16,6 +16,8 @@ const buildHtml = () => `
       padding: 0;
       background-color: #E5E7EB;
       overflow-x: hidden;
+      overflow-anchor: none;
+      scroll-behavior: auto !important;
       font-family: sans-serif;
       transition: background-color 0.3s;
     }
@@ -27,10 +29,10 @@ const buildHtml = () => `
       transition: filter 0.3s;
     }
     .page {
-      width: 100%;
       margin-bottom: 4px;
       position: relative;
       background: #FFFFFF;
+      overflow: hidden;
     }
     
     .page-placeholder {
@@ -268,19 +270,13 @@ const buildHtml = () => `
       }
     });
 
-    // Handle Orientation Resize safely. Re-render pages if layout completely changed.
+    // Handle Orientation Resize safely. Removed aggressive resize re-render logic.
     let resizeTimer = null;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        const divs = container.querySelectorAll('.page');
-        divs.forEach(div => {
-           if (div.dataset.rendered) {
-             div.dataset.rendered = '';
-             div.innerHTML = '<div class="page-placeholder">Page ' + div.dataset.pageNum + '</div>';
-             observer.observe(div);
-           }
-        });
+        // Just trigger a math recalculation if needed or let CSS handle it
+        updateThumbPosition();
       }, 200);
     });
 
@@ -308,13 +304,17 @@ const buildHtml = () => `
       try {
         const firstPage = await pdfDoc.getPage(1);
         const vp = firstPage.getViewport({ scale: 1 });
-        const ratio = vp.height / vp.width;
+        
+        let ww = window.innerWidth;
+        if (!ww || ww <= 0) ww = document.documentElement.clientWidth || window.screen.width || 400;
+        window.pdfBaseScale = ww / vp.width;
 
         for (let i = 1; i <= pdfDoc.numPages; i++) {
           const div = document.createElement('div');
           div.className = 'page';
           div.dataset.pageNum = i;
-          div.style.paddingTop = (ratio * 100) + '%'; 
+          div.style.width = Math.round(vp.width * window.pdfBaseScale) + 'px';
+          div.style.height = Math.round(vp.height * window.pdfBaseScale) + 'px';
           div.innerHTML = '<div class="page-placeholder">Page ' + i + '</div>';
           container.appendChild(div);
           observer.observe(div);
@@ -324,10 +324,14 @@ const buildHtml = () => `
 
         requestAnimationFrame(() => {
           setTimeout(() => {
-            if (startScrollY && startScrollY > 0) {
-              window.scrollTo({ top: startScrollY, behavior: 'instant' });
-            } else if (initialPage && initialPage > 1) {
-              scrollToPage(initialPage);
+            const targetDiv = initialPage && initialPage > 1 ? container.querySelector('[data-page-num="' + initialPage + '"]') : null;
+            const targetY = targetDiv ? targetDiv.offsetTop : (startScrollY || 0);
+            if (targetY > 0) {
+              document.documentElement.style.scrollBehavior = 'auto';
+              document.documentElement.scrollTop = targetY;
+              document.body.scrollTop = targetY;
+              window.scrollTo(0, targetY);
+              lastReportedPage = initialPage || 1;
             }
           }, 150);
         });
@@ -337,7 +341,7 @@ const buildHtml = () => `
     function scrollToPage(pageNum) {
       const div = container.querySelector('[data-page-num="' + pageNum + '"]');
       if (div) {
-        div.scrollIntoView({ behavior: 'auto', block: 'start' });
+        window.scrollTo(0, div.offsetTop);
         lastReportedPage = pageNum;
         postRN({ type: 'progress', page: pageNum, scrollY: Math.round(window.scrollY) });
       }
@@ -384,34 +388,37 @@ const buildHtml = () => `
         const page = await pdfDoc.getPage(num);
         const dpr = window.devicePixelRatio || 1;
         const naturalVp = page.getViewport({ scale: 1 });
-        const cssScale = window.innerWidth / naturalVp.width;
         
+        const cssScale = window.pdfBaseScale || (window.innerWidth / naturalVp.width);
         const cssViewport = page.getViewport({ scale: cssScale });
-        const renderViewport = page.getViewport({ scale: cssScale * dpr });
+        
+        div.style.width = Math.round(cssViewport.width) + 'px';
+        div.style.height = Math.round(cssViewport.height) + 'px';
         
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width  = renderViewport.width;
-        canvas.height = renderViewport.height;
+        canvas.width  = Math.max(1, Math.round(cssViewport.width * dpr));
+        canvas.height = Math.max(1, Math.round(cssViewport.height * dpr));
         canvas.style.position = 'absolute';
         canvas.style.top = '0';
         canvas.style.left = '0';
         canvas.style.width  = '100%';
         canvas.style.height = '100%';
         
-        await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+        await page.render({ 
+          canvasContext: ctx, 
+          transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+          viewport: cssViewport 
+        }).promise;
 
         const textDiv = document.createElement('div');
         textDiv.className = 'textLayer';
-        textDiv.style.width  = Math.round(cssViewport.width) + 'px';
-        textDiv.style.height = Math.round(cssViewport.height) + 'px';
+        textDiv.style.width  = '100%';
+        textDiv.style.height = '100%';
         
-        // Ensure text layer scales with the absolute positioned responsive div!
         textDiv.style.position = 'absolute';
         textDiv.style.top = '0';
         textDiv.style.left = '0';
-        textDiv.style.transform = 'scale(' + (window.innerWidth / Math.round(cssViewport.width)) + ')';
-        textDiv.style.transformOrigin = '0 0';
 
         const textContent = await page.getTextContent();
         pdfjsLib.renderTextLayer({
@@ -456,6 +463,16 @@ const buildHtml = () => `
       } else {
         postRN({ type: 'action', action: actionType, text, context: ctx });
       }
+      setTimeout(() => {
+        const currentSel = window.getSelection();
+        if (currentSel) currentSel.removeAllRanges();
+        if (document.activeElement) document.activeElement.blur();
+        
+        // Force teardrop handles to vanish natively on Android
+        const txtLayers = document.querySelectorAll('.textLayer');
+        txtLayers.forEach(l => l.style.pointerEvents = 'none');
+        setTimeout(() => txtLayers.forEach(l => l.style.pointerEvents = 'auto'), 100);
+      }, 50);
     }
 
     let toolbarTimer = null;
@@ -498,6 +515,7 @@ const buildHtml = () => `
 
 export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDarkMode = false, onAction, onCopy, onProgress }) {
   const webviewRef = useRef(null);
+  const htmlSource = useRef({ html: buildHtml() }).current;
   const [loading, setLoading] = useState(true);
   const [statusText, setStatusText] = useState('Initializing...');
   const lastSelectedText = useRef('');
@@ -515,12 +533,12 @@ export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDa
       setStatusText('Reading file...');
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
       setStatusText('Sending to viewer...');
-      const script = \`
+      const script = `
         try {
-          window.receivePdfData("\${base64}", \${initialPage}, \${isDarkMode}, \${startScrollY});
+          window.receivePdfData(${JSON.stringify(base64)}, ${initialPage}, ${isDarkMode}, ${startScrollY});
         } catch(e) {}
         true;
-      \`;
+      `;
       webviewRef.current?.injectJavaScript(script);
     } catch (err) {
       setStatusText('Error: ' + err.message);
@@ -529,12 +547,12 @@ export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDa
 
   useEffect(() => {
     if (!loading) {
-      webviewRef.current?.injectJavaScript(\`
+      webviewRef.current?.injectJavaScript(`
         if (typeof window.setDarkMode === 'function') {
-          window.setDarkMode(\${isDarkMode});
+          window.setDarkMode(${isDarkMode});
         }
         true;
-      \`);
+      `);
     }
   }, [isDarkMode, loading]);
 
@@ -558,7 +576,7 @@ export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDa
       } else if (data.type === 'tap') {
         if (onAction) onAction('tap', '', '');
       }
-    } catch (e) {}
+    } catch (e) { }
   }, [uri, loadPdf, onProgress, onAction, onCopy]);
 
   return (
@@ -572,12 +590,12 @@ export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDa
       <WebView
         ref={webviewRef}
         originWhitelist={['*']}
-        source={{ html: buildHtml() }}
+        source={htmlSource}
         onMessage={handleMessage}
         javaScriptEnabled
         domStorageEnabled
         allowsFullscreenVideo={false}
-        style={[styles.webview, loading && { width: 0, height: 0 }]}
+        style={[styles.webview, loading && { opacity: 0 }]}
       />
     </View>
   );
