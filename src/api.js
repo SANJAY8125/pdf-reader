@@ -61,27 +61,106 @@ const saveCache = async (key, cacheObj) => {
   }
 };
 
-export const lookupWord = async (word) => {
-  const cleanWord = word.trim().toLowerCase().replace(/[^a-z0-9]/gi, '');
-  if (!cleanWord) return "No text selected.";
-  
-  await initCache();
-  if (dictCacheMemory[cleanWord]) {
-    return dictCacheMemory[cleanWord];
+// Simple rule-based lemmatizer to normalize inflected words before dictionary lookup
+const IRREGULAR_VERBS = {
+  // Past tense irregulars
+  went: 'go', gone: 'go',
+  ran: 'run', run: 'run',
+  was: 'be', were: 'be', been: 'be', am: 'be', is: 'be', are: 'be',
+  had: 'have', has: 'have',
+  did: 'do', done: 'do',
+  said: 'say', told: 'tell',
+  saw: 'see', seen: 'see',
+  came: 'come', come: 'come',
+  took: 'take', taken: 'take',
+  got: 'get', gotten: 'get',
+  made: 'make', knew: 'know', known: 'know',
+  thought: 'think', brought: 'bring',
+  bought: 'buy', caught: 'catch',
+  taught: 'teach', sought: 'seek',
+  found: 'find', kept: 'keep',
+  left: 'leave', felt: 'feel',
+  met: 'meet', sent: 'send',
+  spent: 'spend', built: 'build',
+  lost: 'lose', won: 'win',
+  sat: 'sit', stood: 'stand',
+  gave: 'give', given: 'give',
+  wrote: 'write', written: 'write',
+  spoke: 'speak', spoken: 'speak',
+  chose: 'choose', chosen: 'choose',
+  broke: 'break', broken: 'break',
+  drove: 'drive', driven: 'drive',
+  flew: 'fly', flown: 'fly',
+  grew: 'grow', grown: 'grow',
+  wore: 'wear', worn: 'wear',
+  bore: 'bear', born: 'bear',
+  led: 'lead', read: 'read',
+  held: 'hold', sold: 'sell',
+  told: 'tell', fell: 'fall', fallen: 'fall',
+};
+
+const lemmatize = (word) => {
+  if (!word) return word;
+  const w = word.toLowerCase();
+
+  // Check irregular first
+  if (IRREGULAR_VERBS[w]) return IRREGULAR_VERBS[w];
+
+  // -ing → remove to get base (e.g. running→run, making→make)
+  if (w.length > 5 && w.endsWith('ing')) {
+    const stem = w.slice(0, -3);
+    // doubled consonant: running → run
+    if (stem.length > 2 && stem[stem.length - 1] === stem[stem.length - 2]) {
+      return stem.slice(0, -1);
+    }
+    return stem.endsWith('e') ? stem : stem; // making → make is already handled by dict
   }
+
+  // -ed → base form
+  if (w.length > 4 && w.endsWith('ed')) {
+    const stem = w.slice(0, -2);
+    // doubled consonant: stopped → stop
+    if (stem.length > 2 && stem[stem.length - 1] === stem[stem.length - 2]) {
+      return stem.slice(0, -1);
+    }
+    // loved → love (ends with e after removing d)
+    if (w.endsWith('ed') && !w.endsWith('eed')) {
+      return stem;
+    }
+  }
+
+  // -s / -es suffix (plurals & 3rd person singular)
+  if (w.length > 4 && w.endsWith('ies')) return w.slice(0, -3) + 'y'; // tries → try
+  if (w.length > 4 && w.endsWith('es') && !w.endsWith('oes')) return w.slice(0, -2);
+  if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
+
+  return w;
+};
+
+export const lookupWord = async (word) => {
+  const cleanWord = word.trim().toLowerCase().replace(/[^a-z]/g, '');
+  if (!cleanWord) return "No text selected.";
+
+  // Normalize to base form
+  const baseWord = lemmatize(cleanWord);
+
+  await initCache();
+  // Check cache for both forms
+  if (dictCacheMemory[cleanWord]) return dictCacheMemory[cleanWord];
+  if (baseWord !== cleanWord && dictCacheMemory[baseWord]) return dictCacheMemory[baseWord];
 
   let result = "No definition found. Try AI explanation.";
   const dict = await getDictionary();
 
-  if (dict && dict[cleanWord]) {
-    let rawMeaning = dict[cleanWord];
-    result = rawMeaning.replace(/(?:\s+|^)(\d+\.)\s/g, '\n$1 ').trim();
+  // Try original word first, then lemmatized base
+  const entry = (dict && dict[cleanWord]) || (dict && dict[baseWord]);
+  if (entry) {
+    result = entry.replace(/(?:\s+|^)(\d+\.)\s/g, '\n$1 ').trim();
   }
-  
-  dictCacheMemory[cleanWord] = result;
-  // Fire and forget save
-  saveCache(DICT_CACHE_KEY, dictCacheMemory);
-  
+
+  dictCacheMemory[baseWord] = result;
+  saveCache(DICT_CACHE_KEY, dictCacheMemory); // fire and forget
+
   return result;
 };
 

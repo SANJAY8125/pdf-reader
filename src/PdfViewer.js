@@ -112,7 +112,7 @@ const buildHtml = () => `
       cursor: text;
       transform-origin: 0% 0%;
     }
-    ::selection { background: rgba(30, 100, 220, 0.55); }
+    ::selection { background: rgba(30, 100, 220, 0.6); color: transparent; }
 
     /* Floating AI toolbar */
     #ai-toolbar {
@@ -128,10 +128,9 @@ const buildHtml = () => `
       box-shadow: 0 4px 24px rgba(0,0,0,0.7);
       pointer-events: auto;
       align-items: center;
-      max-width: 90vw;
+      max-width: 80vw;
       width: auto;
       flex-wrap: wrap;
-      transform-origin: top left;
     }
     .ai-btn {
       flex-shrink: 0;
@@ -512,47 +511,6 @@ const buildHtml = () => `
       }, 50);
     }
 
-    // ── Toolbar positioning: zoom-resistant via visualViewport ──
-    let lastSelRect = null;
-
-    function applyToolbarPosition() {
-      if (!lastSelRect || toolbar.style.display === 'none') return;
-      const vv = window.visualViewport;
-      const scale = vv ? vv.scale : 1;
-      // Visual viewport width for edge-clamping (smaller than layout when zoomed)
-      const viewW = vv ? vv.width : window.innerWidth;
-
-      // Counter-scale: toolbar renders at constant physical size.
-      // transform-origin: top left  →  CSS top/left == visual top/left.
-      // Visual size = offset size / scale  (simple, no halfShift needed).
-      toolbar.style.transform = 'scale(' + (1 / scale) + ')';
-
-      const visW = toolbar.offsetWidth  / scale;  // effective visual width
-      const visH = toolbar.offsetHeight / scale;  // effective visual height
-
-      // Vertical: visual top = CSS top (top-left origin)
-      let top = lastSelRect.top - visH - 10;
-      if (top < 8) top = lastSelRect.bottom + 10;
-
-      // Horizontal: centre visual toolbar over selection
-      // visual left = CSS left  →  left = selCenterX - visW/2
-      const selCenterX = lastSelRect.left + lastSelRect.width / 2;
-      let left = selCenterX - visW / 2;
-
-      // Clamp in visual coords (== CSS coords with top-left origin)
-      if (left < 8) left = 8;
-      if (left + visW > viewW - 8) left = viewW - visW - 8;
-
-      toolbar.style.top  = top  + 'px';
-      toolbar.style.left = left + 'px';
-    }
-
-    // Re-apply whenever the user zooms or pans (keeps toolbar locked to text)
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', applyToolbarPosition);
-      window.visualViewport.addEventListener('scroll', applyToolbarPosition);
-    }
-
     let toolbarTimer = null;
     document.addEventListener('selectionchange', () => {
       clearTimeout(toolbarTimer);
@@ -567,14 +525,17 @@ const buildHtml = () => `
             dictBtn.style.display = hasSpace ? 'none' : 'flex';
           }
           const range = sel.getRangeAt(0);
-          lastSelRect = range.getBoundingClientRect();
+          const rect = range.getBoundingClientRect();
           toolbar.style.display = 'flex';
-          applyToolbarPosition();
+          let top = rect.top - toolbar.offsetHeight - 10;
+          if (top < 8) top = rect.bottom + 10;
+          let left = rect.left + rect.width / 2 - toolbar.offsetWidth / 2;
+          if (left < 8) left = 8;
+          if (left + toolbar.offsetWidth > window.innerWidth - 8) left = window.innerWidth - toolbar.offsetWidth - 8;
+          toolbar.style.top = top + 'px';
+          toolbar.style.left = left + 'px';
         }, 300);
-      } else {
-        lastSelRect = null;
-        toolbar.style.display = 'none';
-      }
+      } else { toolbar.style.display = 'none'; }
     });
 
     document.addEventListener('click', (e) => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, SafeAreaView,
   ActivityIndicator, ScrollView, FlatList,
-  BackHandler, StatusBar as RNStatusBar, Platform, Animated, useWindowDimensions
+  BackHandler, StatusBar as RNStatusBar, Platform, Animated
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as DocumentPicker from 'expo-document-picker';
@@ -34,50 +34,6 @@ function getFilename(name) {
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? RNStatusBar.currentHeight || 24 : 0;
 
-// Simple rule-based lemmatizer for dictionary lookups
-function lemmatize(word) {
-  const w = word.toLowerCase().trim();
-  const irregulars = {
-    went: 'go', gone: 'go', goes: 'go',
-    ran: 'run', runs: 'run',
-    was: 'be', were: 'be', been: 'be', is: 'be', are: 'be',
-    had: 'have', has: 'have',
-    did: 'do', does: 'do', done: 'do',
-    said: 'say', says: 'say',
-    got: 'get', gotten: 'get', gets: 'get',
-    made: 'make', makes: 'make',
-    knew: 'know', known: 'know', knows: 'know',
-    came: 'come', comes: 'come',
-    took: 'take', taken: 'take', takes: 'take',
-    saw: 'see', seen: 'see', sees: 'see',
-    thought: 'think', thinks: 'think',
-    bought: 'buy', buys: 'buy',
-    brought: 'bring', brings: 'bring',
-    felt: 'feel', feels: 'feel',
-    left: 'leave', leaves: 'leave',
-    kept: 'keep', keeps: 'keep',
-    told: 'tell', tells: 'tell',
-    found: 'find', finds: 'find',
-    gave: 'give', given: 'give', gives: 'give',
-    met: 'meet', meets: 'meet',
-    lost: 'lose', loses: 'lose',
-    led: 'lead', leads: 'lead',
-    read: 'read', reads: 'read',
-  };
-  if (irregulars[w]) return irregulars[w];
-  // Remove simple suffixes
-  if (w.length > 5 && w.endsWith('ing')) return w.slice(0, -3);
-  if (w.length > 4 && w.endsWith('ies')) return w.slice(0, -3) + 'y';
-  if (w.length > 4 && w.endsWith('ed')) {
-    // doubled consonant e.g. stopped → stop
-    if (w[w.length - 3] === w[w.length - 4]) return w.slice(0, -3);
-    return w.slice(0, -2);
-  }
-  if (w.length > 3 && w.endsWith('es')) return w.slice(0, -2);
-  if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
-  return w;
-}
-
 export default function App() {
   const [screen, setScreen] = useState(SCREEN_HOME);
   const [history, setHistory] = useState([]);
@@ -90,8 +46,6 @@ export default function App() {
   const [isAppReady, setIsAppReady] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
-  const { width: winWidth, height: winHeight } = useWindowDimensions();
-  const isLandscapeNow = winWidth > winHeight;
 
   // AI Modal
   const [modalVisible, setModalVisible] = useState(false);
@@ -273,16 +227,15 @@ export default function App() {
   const handleDictionary = async (text, contextText, canRefine) => {
     openModal();
     setIsLoading(true);
-    const rawWord = text.split(/[ \n]/)[0].replace(/[^a-zA-Z]/g, '');
-    const baseWord = lemmatize(rawWord); // normalize to base form
-    setResultTitle(baseWord || 'Dictionary');
+    const firstWord = text.split(/[ \n]/)[0].replace(/[^a-zA-Z]/g, '');
+    setResultTitle(firstWord || "Dictionary");
     try {
-      const meaning = await lookupWord(baseWord);
+      const meaning = await lookupWord(firstWord);
       setResultContent(meaning);
     } catch (error) {
       setResultContent(error.message || 'Could not fetch dictionary.');
     }
-    if (canRefine) setRefineContext({ text: baseWord, contextText });
+    if (canRefine) setRefineContext({ text: firstWord, contextText });
     setIsLoading(false);
   };
 
@@ -412,8 +365,11 @@ export default function App() {
             <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={closeModal} />
           </Animated.View>
           
-          <Animated.View style={[styles.bottomSheet, { transform: [{ translateY: slideAnim }], maxHeight: isLandscapeNow ? '50%' : '80%' }]}>
-            {!isLandscapeNow && <View style={styles.sheetHandle} />}
+          <Animated.View style={[
+            styles.bottomSheet,
+            isLandscape && styles.bottomSheetLandscape,
+            { transform: [{ translateY: slideAnim }] }
+          ]}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>
                 {resultTitle.charAt(0).toUpperCase() + resultTitle.slice(1)}
@@ -423,14 +379,18 @@ export default function App() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator>
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 24 }}
+              showsVerticalScrollIndicator
+            >
               {isLoading ? (
                 <View style={styles.loadingBox}>
                   <ActivityIndicator color="#4B7BFF" size="large" />
                   <Text style={styles.loadingLabel}>Analyzing...</Text>
                 </View>
               ) : (
-                <View style={{ paddingBottom: 40 }}>
+                <View>
                   <Text style={styles.resultText}>{resultContent}</Text>
                   {refineContext && (
                     <TouchableOpacity
@@ -525,11 +485,11 @@ const styles = StyleSheet.create({
   },
   bottomSheet: {
     backgroundColor: '#151820', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 20, maxHeight: '80%', minHeight: '35%',
+    padding: 20, maxHeight: '80%', minHeight: '30%',
   },
-  sheetHandle: {
-    width: 40, height: 4, backgroundColor: '#2C2F40',
-    borderRadius: 2, alignSelf: 'center', marginBottom: 16,
+  bottomSheetLandscape: {
+    maxHeight: '50%',
+    minHeight: 0,
   },
   sheetHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
