@@ -11,10 +11,25 @@ const buildHtml = () => `
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <style>
     * { box-sizing: border-box; }
+
+    :root {
+      --body-bg: #E5E7EB;
+      --container-bg: transparent;
+      --page-bg: #FFFFFF;
+      --page-filter: none;
+    }
+    :root.dark-mode {
+      --body-bg: #000000;
+      --container-bg: #000000; 
+      /* #EEEEEE inverts to roughly #111111 */
+      --page-bg: #EEEEEE;
+      --page-filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(105%);
+    }
+
     html, body {
       margin: 0;
       padding: 0;
-      background-color: #E5E7EB;
+      background-color: var(--body-bg) !important;
       overflow-x: hidden;
       overflow-anchor: none;
       scroll-behavior: auto !important;
@@ -26,13 +41,16 @@ const buildHtml = () => `
       display: flex;
       flex-direction: column;
       align-items: center;
-      transition: filter 0.3s;
+      background-color: var(--container-bg) !important;
+      transition: background-color 0.3s;
     }
     .page {
-      margin-bottom: 4px;
+      margin-bottom: 2px;
       position: relative;
-      background: #FFFFFF;
+      background: var(--page-bg) !important;
+      filter: var(--page-filter);
       overflow: hidden;
+      transition: filter 0.3s, background-color 0.3s;
     }
     
     .page-placeholder {
@@ -94,7 +112,7 @@ const buildHtml = () => `
       cursor: text;
       transform-origin: 0% 0%;
     }
-    ::selection { background: rgba(75, 123, 255, 0.4); color: transparent; }
+    ::selection { background: rgba(30, 100, 220, 0.55); }
 
     /* Floating AI toolbar */
     #ai-toolbar {
@@ -110,8 +128,13 @@ const buildHtml = () => `
       box-shadow: 0 4px 24px rgba(0,0,0,0.7);
       pointer-events: auto;
       align-items: center;
+      max-width: 90vw;
+      width: auto;
+      flex-wrap: wrap;
+      transform-origin: top left;
     }
     .ai-btn {
+      flex-shrink: 0;
       background: transparent;
       color: #fff;
       border: none;
@@ -161,22 +184,18 @@ const buildHtml = () => `
       postRN({ type: 'ready' });
     }
 
-    // Modern CSS Filter Dark Mode approach
+    // Modern CSS Filter Dark Mode approach (Isolating filter to pages)
     window.isDarkMode = false;
     window.setDarkMode = function(val) {
       if (window.isDarkMode === val) return;
       window.isDarkMode = val;
-      const container = document.getElementById('pdf-container');
-      if (!container) return;
       
       if (val) {
-        document.body.style.backgroundColor = '#000000';
-        container.style.backgroundColor = '#000000';
-        container.style.filter = 'invert(100%) hue-rotate(180deg) brightness(95%) contrast(105%)';
+        document.documentElement.classList.add('dark-mode');
+        document.body.classList.add('dark-mode');
       } else {
-        document.body.style.backgroundColor = '#E5E7EB';
-        container.style.backgroundColor = 'transparent';
-        container.style.filter = 'none';
+        document.documentElement.classList.remove('dark-mode');
+        document.body.classList.remove('dark-mode');
       }
     };
 
@@ -493,6 +512,47 @@ const buildHtml = () => `
       }, 50);
     }
 
+    // ── Toolbar positioning: zoom-resistant via visualViewport ──
+    let lastSelRect = null;
+
+    function applyToolbarPosition() {
+      if (!lastSelRect || toolbar.style.display === 'none') return;
+      const vv = window.visualViewport;
+      const scale = vv ? vv.scale : 1;
+      // Visual viewport width for edge-clamping (smaller than layout when zoomed)
+      const viewW = vv ? vv.width : window.innerWidth;
+
+      // Counter-scale: toolbar renders at constant physical size.
+      // transform-origin: top left  →  CSS top/left == visual top/left.
+      // Visual size = offset size / scale  (simple, no halfShift needed).
+      toolbar.style.transform = 'scale(' + (1 / scale) + ')';
+
+      const visW = toolbar.offsetWidth  / scale;  // effective visual width
+      const visH = toolbar.offsetHeight / scale;  // effective visual height
+
+      // Vertical: visual top = CSS top (top-left origin)
+      let top = lastSelRect.top - visH - 10;
+      if (top < 8) top = lastSelRect.bottom + 10;
+
+      // Horizontal: centre visual toolbar over selection
+      // visual left = CSS left  →  left = selCenterX - visW/2
+      const selCenterX = lastSelRect.left + lastSelRect.width / 2;
+      let left = selCenterX - visW / 2;
+
+      // Clamp in visual coords (== CSS coords with top-left origin)
+      if (left < 8) left = 8;
+      if (left + visW > viewW - 8) left = viewW - visW - 8;
+
+      toolbar.style.top  = top  + 'px';
+      toolbar.style.left = left + 'px';
+    }
+
+    // Re-apply whenever the user zooms or pans (keeps toolbar locked to text)
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', applyToolbarPosition);
+      window.visualViewport.addEventListener('scroll', applyToolbarPosition);
+    }
+
     let toolbarTimer = null;
     document.addEventListener('selectionchange', () => {
       clearTimeout(toolbarTimer);
@@ -507,17 +567,14 @@ const buildHtml = () => `
             dictBtn.style.display = hasSpace ? 'none' : 'flex';
           }
           const range = sel.getRangeAt(0);
-          const rect = range.getBoundingClientRect();
+          lastSelRect = range.getBoundingClientRect();
           toolbar.style.display = 'flex';
-          let top = rect.top - toolbar.offsetHeight - 10;
-          if (top < 8) top = rect.bottom + 10;
-          let left = rect.left + rect.width / 2 - toolbar.offsetWidth / 2;
-          if (left < 8) left = 8;
-          if (left + toolbar.offsetWidth > window.innerWidth - 8) left = window.innerWidth - toolbar.offsetWidth - 8;
-          toolbar.style.top = top + 'px';
-          toolbar.style.left = left + 'px';
+          applyToolbarPosition();
         }, 300);
-      } else { toolbar.style.display = 'none'; }
+      } else {
+        lastSelRect = null;
+        toolbar.style.display = 'none';
+      }
     });
 
     document.addEventListener('click', (e) => {
@@ -598,9 +655,9 @@ export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDa
   }, [uri, loadPdf, onProgress, onAction, onCopy]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: isDarkMode ? '#000000' : '#E5E7EB' }]}>
       {loading && (
-        <View style={styles.loadingContainer}>
+        <View style={[styles.loadingContainer, { backgroundColor: isDarkMode ? '#000000' : '#E5E7EB' }]}>
           <ActivityIndicator size="large" color="#4B7BFF" />
           <Text style={styles.loadingText}>{statusText}</Text>
         </View>
@@ -620,13 +677,12 @@ export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDa
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#121212' },
+  container: { flex: 1 },
   webview: { flex: 1, backgroundColor: 'transparent' },
   loadingContainer: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#121212',
     zIndex: 10,
   },
   loadingText: {
