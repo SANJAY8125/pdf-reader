@@ -7,7 +7,7 @@ const buildHtml = () => `
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=4.0, user-scalable=yes">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <style>
     * { box-sizing: border-box; }
@@ -30,14 +30,15 @@ const buildHtml = () => `
       margin: 0;
       padding: 0;
       background-color: var(--body-bg) !important;
-      overflow-x: hidden;
+      overflow-x: auto;
       overflow-anchor: none;
       scroll-behavior: auto !important;
       font-family: sans-serif;
       transition: background-color 0.3s;
     }
     #pdf-container {
-      width: 100%;
+      min-width: 100%;
+      width: max-content;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -97,14 +98,24 @@ const buildHtml = () => `
     .thumb-dots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
     .thumb-dot { width: 3px; height: 3px; background: #A0AABF; border-radius: 50%; }
     
-    canvas { display: block; }
+    canvas {
+      display: block;
+      image-rendering: -webkit-optimize-contrast;
+    }
+
     .textLayer {
       position: absolute;
-      left: 0; top: 0; right: 0; bottom: 0;
+      left: 0 !important;
+      top: 0 !important;
+      right: 0;
+      bottom: 0;
       overflow: hidden;
-      opacity: 0.25;
+      opacity: 0;                /* 🔥 MAIN FIX */
+      pointer-events: auto;      /* keep selection working */
       line-height: 1.0;
+      transform: none !important;
     }
+
     .textLayer > span {
       color: transparent;
       position: absolute;
@@ -172,6 +183,99 @@ const buildHtml = () => `
     <button class="ai-btn dict" title="Meaning" onmousedown="handleBtn(event,'dict')" ontouchstart="handleBtn(event,'dict')">&#x1F4D6;</button>
   </div>
   <script>
+    let zoom = 1;
+    const MIN_ZOOM = 0.5;
+    const MAX_ZOOM = 3;
+
+    function setZoom(newZoom) {
+      if (!pdfDoc) return;
+      zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+      buildPlaceholders(getCurrentPage(), 0, true);
+    }
+
+    // ── Pinch-to-zoom gesture ──
+    let pinchStartDist = null;
+    let pinchStartZoom = 1;
+    let pinchScreenMidX = 0;
+    let pinchScreenMidY = 0;
+    let pinchScrollYAtStart = 0;
+    let pinchFinalScale = 1;
+    let pinchAnchorPage = 1;
+    let pinchAnchorOffsetWithinPage = 0;
+
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        pinchStartDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        pinchStartZoom = zoom;
+        pinchScrollYAtStart = window.scrollY;
+        pinchScreenMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        pinchScreenMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        pinchFinalScale = 1;
+
+        // Record which page and how far into it the pinch midpoint is
+        const anchorDocY = pinchScrollYAtStart + pinchScreenMidY;
+        const pageDivs = container.querySelectorAll('.page');
+        pinchAnchorPage = 1;
+        pinchAnchorOffsetWithinPage = 0;
+        pageDivs.forEach(div => {
+          const top = div.offsetTop;
+          if (anchorDocY >= top) {
+            pinchAnchorPage = parseInt(div.dataset.pageNum, 10);
+            pinchAnchorOffsetWithinPage = anchorDocY - top;
+          }
+        });
+
+        const originX = pinchScreenMidX;
+        const originY = anchorDocY;
+        container.style.transformOrigin = originX + 'px ' + originY + 'px';
+      }
+    }, { passive: false });
+
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && pinchStartDist) {
+        e.preventDefault();
+        const currentDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        pinchFinalScale = currentDist / pinchStartDist;
+        const clampedScale = Math.max(MIN_ZOOM / pinchStartZoom, Math.min(MAX_ZOOM / pinchStartZoom, pinchFinalScale));
+        container.style.transform = 'scale(' + clampedScale + ')';
+      }
+    }, { passive: false });
+
+    document.addEventListener('touchend', (e) => {
+      if (!pinchStartDist || e.touches.length >= 2) return;
+
+      const clampedScale = Math.max(MIN_ZOOM / pinchStartZoom, Math.min(MAX_ZOOM / pinchStartZoom, pinchFinalScale));
+      const finalZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinchStartZoom * clampedScale));
+
+      if (Math.abs(finalZoom - pinchStartZoom) < 0.05) {
+        // No meaningful zoom change
+        container.style.transform = 'none';
+        container.style.transformOrigin = '0px 0px';
+        pinchStartDist = null;
+        pinchFinalScale = 1;
+        return;
+      }
+
+      zoom = finalZoom;
+
+      // Re-render at new zoom — scroll so anchor page stays at same screen position
+      const zoomRatio = finalZoom / pinchStartZoom;
+      const scaledOffset = pinchAnchorOffsetWithinPage * zoomRatio;
+
+      // Do NOT clear transform here, wait for buildPlaceholders to append new divs
+      buildPlaceholders(pinchAnchorPage, pinchScreenMidY, true, scaledOffset);
+
+      pinchStartDist = null;
+      pinchFinalScale = 1;
+    });
+
     function postRN(data) { window.ReactNativeWebView.postMessage(JSON.stringify(data)); }
 
     window.onerror = function(msg, src, line) { postRN({ type: 'log', message: 'Error: ' + msg + ' at ' + line }); };
@@ -320,7 +424,7 @@ const buildHtml = () => `
       }
     };
 
-    async function buildPlaceholders(initialPage, startScrollY) {
+    async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, anchorOffset = 0) {
       try {
         const firstPage = await pdfDoc.getPage(1);
         const vp = firstPage.getViewport({ scale: 1 });
@@ -334,7 +438,17 @@ const buildHtml = () => `
         const fitScale = ww / vp.width;
         const isLandscape = ww > wh;
         
-        const initScale = isLandscape ? Math.min(fitScale, 0.9) : Math.min(fitScale, 1.2);
+        const initScale = (isLandscape ? Math.min(fitScale, 0.9) : Math.min(fitScale, 1.2)) * zoom;
+
+        if (isZoomRefresh) {
+          observer.disconnect();
+          container.innerHTML = '';
+          renderQueue.clear();
+
+          // Clear transform synchronously right as new layout happens
+          container.style.transform = 'none';
+          container.style.transformOrigin = '0px 0px';
+        }
 
         for (let i = 1; i <= pdfDoc.numPages; i++) {
           const div = document.createElement('div');
@@ -347,21 +461,29 @@ const buildHtml = () => `
           observer.observe(div);
         }
 
-        postRN({ type: 'done_loading' });
-
-        requestAnimationFrame(() => {
-          setTimeout(() => {
-            const targetDiv = initialPage && initialPage > 1 ? container.querySelector('[data-page-num="' + initialPage + '"]') : null;
-            const targetY = targetDiv ? targetDiv.offsetTop : (startScrollY || 0);
-            if (targetY > 0) {
-              document.documentElement.style.scrollBehavior = 'auto';
-              document.documentElement.scrollTop = targetY;
-              document.body.scrollTop = targetY;
-              window.scrollTo(0, targetY);
-              lastReportedPage = initialPage || 1;
-            }
-          }, 150);
-        });
+        if (isZoomRefresh) {
+          const targetDiv = container.querySelector('[data-page-num="' + initialPage + '"]');
+          if (targetDiv) {
+            // anchorOffset = scaled px from top of anchor page to pinch point
+            // startScrollY = pinchScreenMidY = where on screen the pinch was
+            const targetScrollY = targetDiv.offsetTop + anchorOffset - startScrollY;
+            window.scrollTo(0, Math.max(0, targetScrollY));
+          }
+        } else {
+          postRN({ type: 'done_loading' });
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              const targetDiv = initialPage && initialPage > 1
+                ? container.querySelector('[data-page-num="' + initialPage + '"]')
+                : null;
+              const targetY = targetDiv ? targetDiv.offsetTop : (startScrollY || 0);
+              if (targetY > 0) {
+                window.scrollTo(0, targetY);
+                lastReportedPage = initialPage || 1;
+              }
+            }, 150);
+          });
+        }
       } catch(e) {}
     }
 
@@ -426,7 +548,7 @@ const buildHtml = () => `
           ? Math.min(fitScale, 0.9)
           : Math.min(fitScale, 1.2);
         
-        const cssViewport = page.getViewport({ scale: cssScale });
+        const cssViewport = page.getViewport({ scale: cssScale * zoom });
         
         div.style.width = Math.round(cssViewport.width) + 'px';
         div.style.height = Math.round(cssViewport.height) + 'px';

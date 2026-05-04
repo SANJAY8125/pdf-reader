@@ -6,7 +6,7 @@
     "orientation": "default",
     "icon": "./assets/folixlogo.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/folixlogo.png",
       "resizeMode": "contain",
