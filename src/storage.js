@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 const HISTORY_FILE = FileSystem.documentDirectory + 'pdf_history.json';
 const SESSION_FILE = FileSystem.documentDirectory + 'pdf_session.json';
+const FAVORITES_FILE = FileSystem.documentDirectory + 'pdf_favorites.json';
 
 async function readJSON(path) {
   try {
@@ -35,7 +36,53 @@ export const saveToHistory = async (pdfObj) => {
   } else {
     history.unshift(entry);
   }
-  await writeJSON(HISTORY_FILE, history.slice(0, 20)); // Keep last 20
+  await writeJSON(HISTORY_FILE, history.slice(0, 20));
+};
+
+export const removeFromHistory = async (uri) => {
+  const history = await getHistory();
+  const updated = history.filter(item => item.uri !== uri);
+  await writeJSON(HISTORY_FILE, updated);
+};
+
+export const getFavorites = async () => {
+  return (await readJSON(FAVORITES_FILE)) || [];
+};
+
+export const addToFavorites = async (pdfObj) => {
+  const favs = await getFavorites();
+  const exists = favs.find(item => item.uri === pdfObj.uri);
+  if (!exists) {
+    favs.unshift(pdfObj);
+    await writeJSON(FAVORITES_FILE, favs);
+  }
+};
+
+export const removeFromFavorites = async (uri) => {
+  const favs = await getFavorites();
+  const updated = favs.filter(item => item.uri !== uri);
+  await writeJSON(FAVORITES_FILE, updated);
+};
+
+export const isFavorite = async (uri) => {
+  const favs = await getFavorites();
+  return favs.some(item => item.uri === uri);
+};
+
+export const saveThumbnail = async (uri, base64Png) => {
+  try {
+    const key = uri.replace(/[^a-zA-Z0-9]/g, '_');
+    const thumbPath = FileSystem.documentDirectory + 'thumb_' + key + '.png';
+    await FileSystem.writeAsStringAsync(thumbPath, base64Png, { encoding: 'base64' });
+    return thumbPath;
+  } catch {
+    return null;
+  }
+};
+
+export const getThumbnailPath = (uri) => {
+  const key = uri.replace(/[^a-zA-Z0-9]/g, '_');
+  return FileSystem.documentDirectory + 'thumb_' + key + '.png';
 };
 
 export const getLastSession = async () => {

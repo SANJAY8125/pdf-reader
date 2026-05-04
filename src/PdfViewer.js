@@ -9,6 +9,7 @@ const buildHtml = () => `
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
   <style>
     * { box-sizing: border-box; }
 
@@ -417,10 +418,55 @@ const buildHtml = () => `
         totalPages = pdfDoc.numPages;
         postRN({ type: 'total_pages', totalPages });
         container.innerHTML = '';
-        container.style.justifyContent = totalPages === 1 ? 'center' : 'flex-start';
+        if (totalPages === 1) {
+          container.style.justifyContent = 'center';
+          container.style.minHeight = '100vh';
+        } else {
+          container.style.justifyContent = 'flex-start';
+          container.style.minHeight = '';
+        }
         await buildPlaceholders(initialPage || 1, startScrollY);
+        // Generate thumbnail from page 1
+        try {
+          const thumbPage = await pdfDoc.getPage(1);
+          const thumbVp = thumbPage.getViewport({ scale: 0.5 });
+          const thumbCanvas = document.createElement('canvas');
+          thumbCanvas.width = Math.round(thumbVp.width);
+          thumbCanvas.height = Math.round(thumbVp.height);
+          const thumbCtx = thumbCanvas.getContext('2d');
+          await thumbPage.render({ canvasContext: thumbCtx, viewport: thumbVp }).promise;
+          const thumbBase64 = thumbCanvas.toDataURL('image/png').split(',')[1];
+          postRN({ type: 'thumbnail', data: thumbBase64 });
+        } catch(e) {}
       } catch(e) {
         postRN({ type: 'log', message: 'receivePdfData error: ' + e.message });
+      }
+    };
+
+    window.receiveDocxData = async function(b64Data, startInDarkMode) {
+      try {
+        window.isDarkMode = !!startInDarkMode;
+        window.setDarkMode(window.isDarkMode);
+        
+        // Convert base64 to ArrayBuffer
+        const binary = atob(b64Data);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        
+        // Use mammoth.js to convert docx to HTML
+        const result = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+        
+        container.innerHTML = '';
+        const docDiv = document.createElement('div');
+        docDiv.style.cssText = 'padding: 24px; max-width: 100%; font-family: Georgia, serif; font-size: 16px; line-height: 1.8; color: #1a1a1a; background: #fff; min-height: 100vh;';
+        docDiv.innerHTML = result.value;
+        container.appendChild(docDiv);
+        
+        totalPages = 1;
+        postRN({ type: 'total_pages', totalPages: 1 });
+        postRN({ type: 'done_loading' });
+      } catch(e) {
+        postRN({ type: 'log', message: 'receiveDocxData error: ' + e.message });
       }
     };
 
@@ -444,6 +490,14 @@ const buildHtml = () => `
           observer.disconnect();
           container.innerHTML = '';
           renderQueue.clear();
+
+          if (pdfDoc.numPages === 1) {
+            container.style.justifyContent = 'center';
+            container.style.minHeight = '100vh';
+          } else {
+            container.style.justifyContent = 'flex-start';
+            container.style.minHeight = '';
+          }
 
           // Clear transform synchronously right as new layout happens
           container.style.transform = 'none';
@@ -671,7 +725,7 @@ const buildHtml = () => `
 </html>
 `;
 
-export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDarkMode = false, onAction, onCopy, onProgress }) {
+export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDarkMode = false, fileType = 'pdf', onAction, onCopy, onProgress, onMessage }) {
   const webviewRef = useRef(null);
   const htmlSource = useRef({ html: buildHtml() }).current;
   const [loading, setLoading] = useState(true);
@@ -691,17 +745,27 @@ export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDa
       setStatusText('Reading file...');
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
       setStatusText('Sending to viewer...');
-      const script = `
-        try {
-          window.receivePdfData(${JSON.stringify(base64)}, ${initialPage}, ${isDarkMode}, ${startScrollY});
-        } catch(e) {}
-        true;
-      `;
+      let script = '';
+      if (fileType === 'docx') {
+        script = `
+          try {
+            window.receiveDocxData(${JSON.stringify(base64)}, ${isDarkMode});
+          } catch(e) {}
+          true;
+        `;
+      } else {
+        script = `
+          try {
+            window.receivePdfData(${JSON.stringify(base64)}, ${initialPage}, ${isDarkMode}, ${startScrollY});
+          } catch(e) {}
+          true;
+        `;
+      }
       webviewRef.current?.injectJavaScript(script);
     } catch (err) {
       setStatusText('Error: ' + err.message);
     }
-  }, [uri, initialPage, startScrollY]); // Intentionally omitting isDarkMode to prevent complete reload during theme toggle
+  }, [uri, initialPage, startScrollY, fileType]); // Intentionally omitting isDarkMode to prevent complete reload during theme toggle
 
   useEffect(() => {
     if (!loading) {
@@ -715,6 +779,7 @@ export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDa
   }, [isDarkMode, loading]);
 
   const handleMessage = useCallback((event) => {
+    if (onMessage) onMessage(event);
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'log') {
@@ -733,9 +798,11 @@ export default function PdfViewer({ uri, initialPage = 1, startScrollY = 0, isDa
         if (onCopy) onCopy(data.text);
       } else if (data.type === 'tap') {
         if (onAction) onAction('tap', '', '');
+      } else if (data.type === 'thumbnail') {
+        if (onProgress) onProgress({ thumbnail: data.data });
       }
     } catch (e) { }
-  }, [uri, loadPdf, onProgress, onAction, onCopy]);
+  }, [uri, loadPdf, onProgress, onAction, onCopy, onMessage]);
 
   return (
     <View style={[styles.container, { backgroundColor: isDarkMode ? '#000000' : '#E5E7EB' }]}>
