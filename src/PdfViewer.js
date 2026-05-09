@@ -111,8 +111,9 @@ const buildHtml = () => `
       right: 0;
       bottom: 0;
       overflow: hidden;
-      opacity: 0;                /* 🔥 MAIN FIX */
+      opacity: 1;                /* 🔥 MAIN FIX */
       pointer-events: auto;      /* keep selection working */
+      color: transparent;
       line-height: 1.0;
       transform: none !important;
     }
@@ -124,7 +125,8 @@ const buildHtml = () => `
       cursor: text;
       transform-origin: 0% 0%;
     }
-    ::selection { background: rgba(30, 100, 220, 0.6); color: transparent; }
+    ::selection { background: rgba(30, 100, 220, 0.5); }
+    .textLayer > span::selection { background: rgba(30, 100, 220, 0.5); }
 
     /* Floating AI toolbar */
     #ai-toolbar {
@@ -472,19 +474,11 @@ const buildHtml = () => `
 
     async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, anchorOffset = 0) {
       try {
-        const firstPage = await pdfDoc.getPage(1);
-        const vp = firstPage.getViewport({ scale: 1 });
-        
         let ww = window.innerWidth;
         if (!ww || ww <= 0) ww = document.documentElement.clientWidth || window.screen.width || 400;
-        
         let wh = window.innerHeight;
         if (!wh || wh <= 0) wh = document.documentElement.clientHeight || window.screen.height || 800;
-        
-        const fitScale = ww / vp.width;
         const isLandscape = ww > wh;
-        
-        const initScale = (isLandscape ? Math.min(fitScale, 0.9) : Math.min(fitScale, 1.2)) * zoom;
 
         if (isZoomRefresh) {
           observer.disconnect();
@@ -499,18 +493,28 @@ const buildHtml = () => `
             container.style.minHeight = '';
           }
 
-          // Clear transform synchronously right as new layout happens
           container.style.transform = 'none';
           container.style.transformOrigin = '0px 0px';
         }
 
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
+        // Fetch all page viewports in parallel for accurate placeholder sizes
+        const pageViewports = await Promise.all(
+          Array.from({ length: pdfDoc.numPages }, (_, i) =>
+            pdfDoc.getPage(i + 1).then(page => page.getViewport({ scale: 1 }))
+          )
+        );
+
+        for (let i = 0; i < pdfDoc.numPages; i++) {
+          const vp = pageViewports[i];
+          const fitScale = ww / vp.width;
+          const initScale = (isLandscape ? Math.min(fitScale, 0.9) : Math.min(fitScale, 1.2)) * zoom;
+
           const div = document.createElement('div');
           div.className = 'page';
-          div.dataset.pageNum = i;
+          div.dataset.pageNum = i + 1;
           div.style.width = Math.round(vp.width * initScale) + 'px';
           div.style.height = Math.round(vp.height * initScale) + 'px';
-          div.innerHTML = '<div class="page-placeholder">Page ' + i + '</div>';
+          div.innerHTML = '<div class="page-placeholder">Page ' + (i + 1) + '</div>';
           container.appendChild(div);
           observer.observe(div);
         }
@@ -518,8 +522,6 @@ const buildHtml = () => `
         if (isZoomRefresh) {
           const targetDiv = container.querySelector('[data-page-num="' + initialPage + '"]');
           if (targetDiv) {
-            // anchorOffset = scaled px from top of anchor page to pinch point
-            // startScrollY = pinchScreenMidY = where on screen the pinch was
             const targetScrollY = targetDiv.offsetTop + anchorOffset - startScrollY;
             window.scrollTo(0, Math.max(0, targetScrollY));
           }

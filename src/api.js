@@ -4,7 +4,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const GEMINI_API_KEY = Constants.expoConfig?.extra?.GEMINI_API_KEY || Constants.manifest?.extra?.GEMINI_API_KEY;
+const GEMINI_API_KEY =
+  process.env.EXPO_PUBLIC_GEMINI_API_KEY ||
+  Constants.expoConfig?.extra?.GEMINI_API_KEY ||
+  Constants.manifest2?.extra?.expoClient?.extra?.GEMINI_API_KEY ||
+  Constants.manifest?.extra?.GEMINI_API_KEY;
+console.log('GEMINI KEY present:', !!GEMINI_API_KEY, 'length:', GEMINI_API_KEY?.length);
 
 // Memory caches
 let dictCacheMemory = null;
@@ -166,7 +171,7 @@ export const lookupWord = async (word) => {
 
 export const explainWithAI = async (text, contextText = "") => {
   if (!text.trim()) throw new Error("No text selected.");
-  
+
   await initCache();
   const cacheKey = `${text}_${contextText}`;
   if (aiCacheMemory[cacheKey]) {
@@ -182,7 +187,7 @@ export const explainWithAI = async (text, contextText = "") => {
   if (contextText && text) {
     const sentences = contextText.split(/(?<=[.?!])\s+/);
     const targetIdx = sentences.findIndex(s => s.includes(text));
-    
+
     if (targetIdx !== -1) {
       const startIdx = Math.max(0, targetIdx - 1);
       const endIdx = Math.min(sentences.length, targetIdx + 2);
@@ -220,10 +225,15 @@ Surrounding Context: "${trimmedContext}"`;
       );
 
       if (!response.ok) {
-        if (response.status >= 500 || response.status === 429) {
+        const errBody = await response.json().catch(() => ({}));
+        const errMsg = errBody?.error?.message || 'unknown';
+        const errCode = errBody?.error?.code || response.status;
+        console.error('Gemini API failed:', response.status, errMsg);
+
+        if (response.status === 429 || response.status === 503) {
           throw new Error('busy');
         }
-        throw new Error(`API error: ${response.status}`);
+        throw new Error(`API ${errCode}: ${errMsg}`);
       }
       return await response.json();
     } catch (error) {
@@ -238,20 +248,20 @@ Surrounding Context: "${trimmedContext}"`;
   try {
     const data = await makeRequest(2); // up to 2 retries
     const explanation = data.candidates[0].content.parts[0].text;
-    
+
     aiCacheMemory[cacheKey] = explanation;
     saveCache(AI_CACHE_KEY, aiCacheMemory); // fire and forget
-    
+
     return explanation;
   } catch (error) {
-    console.error("AI Explanation Error:", error);
+    console.error("AI Explanation Error:", error.message);
     if (!await checkNetwork()) {
-         throw new Error("Network request failed. Please check your internet connection.");
+      throw new Error("No internet connection.");
     }
     if (error.message === 'busy') {
       throw new Error("AI service is currently busy. Please try again later.");
     }
-    throw new Error("Failed to get AI explanation. Please try again.");
+    throw new Error(error.message); // surface real error instead of generic message
   }
 };
 

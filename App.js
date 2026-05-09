@@ -115,17 +115,27 @@ export default function App() {
 
       const session = await getLastSession();
       if (session?.uri) {
-        setActivePdf({
-          uri: session.uri,
-          name: session.name,
-          initialPage: session.lastPage || 1,
-          startScrollY: session.scrollY || 0,
-          fileType: session.fileType || 'pdf',
-        });
-        setCurrentPage(session.lastPage || 1);
-        setCurrentScrollY(session.scrollY || 0);
-        setTotalPages(session.totalPages || 0);
-        setScreen(SCREEN_READER);
+        try {
+          const info = await FileSystem.getInfoAsync(session.uri);
+          if (info.exists) {
+            setActivePdf({
+              uri: session.uri,
+              name: session.name,
+              initialPage: session.lastPage || 1,
+              startScrollY: session.scrollY || 0,
+              fileType: session.fileType || 'pdf',
+            });
+            setCurrentPage(session.lastPage || 1);
+            setCurrentScrollY(session.scrollY || 0);
+            setTotalPages(session.totalPages || 0);
+            setScreen(SCREEN_READER);
+          } else {
+            // File gone — clear session silently
+            await setLastSession(null);
+          }
+        } catch {
+          await setLastSession(null);
+        }
       }
       setIsAppReady(true);
     }
@@ -190,8 +200,23 @@ export default function App() {
       if (result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         const isDocx = asset.name?.toLowerCase().endsWith('.docx') || asset.name?.toLowerCase().endsWith('.doc');
+
+        // Copy to permanent app storage so URI survives app restarts
+        const permanentDir = FileSystem.documentDirectory + 'pdfs/';
+        await FileSystem.makeDirectoryAsync(permanentDir, { intermediates: true });
+        const safeName = asset.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const permanentUri = permanentDir + safeName;
+
+        try {
+          await FileSystem.copyAsync({ from: asset.uri, to: permanentUri });
+        } catch (e) {
+          // If copy fails (file already exists etc), use original
+        }
+
+        const finalUri = permanentUri;
+
         const pdfEntry = {
-          uri: asset.uri,
+          uri: finalUri,
           name: asset.name || 'Unknown file',
           lastPage: 1,
           scrollY: 0,
