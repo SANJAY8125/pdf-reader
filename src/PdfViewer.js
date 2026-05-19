@@ -20,11 +20,10 @@ const buildHtml = () => `
       --page-filter: none;
     }
     :root.dark-mode {
-      --body-bg: #000000;
-      --container-bg: #000000; 
-      /* #EEEEEE inverts to roughly #111111 */
-      --page-bg: #EEEEEE;
-      --page-filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(105%);
+      --body-bg: #1a1a1a;
+      --container-bg: #1a1a1a; 
+      --page-bg: #2a2a2a;
+      --page-filter: none;
     }
 
     html, body {
@@ -53,6 +52,19 @@ const buildHtml = () => `
       filter: var(--page-filter);
       overflow: hidden;
       transition: filter 0.3s, background-color 0.3s;
+    }
+
+    .page.dark-mode-text {
+      background-color: var(--page-bg);
+      color: #ffffff;
+    }
+
+    .page.dark-mode-text canvas {
+      filter: invert(100%) hue-rotate(180deg) brightness(1.1) contrast(1.1);
+    }
+
+    .page.dark-mode-text .textLayer > span {
+      color: transparent;
     }
     
     .page-placeholder {
@@ -296,12 +308,29 @@ const buildHtml = () => `
       if (window.isDarkMode === val) return;
       window.isDarkMode = val;
       
+      const pages = document.querySelectorAll('.page');
+      const docDiv = document.querySelector('#pdf-container > div:not(.page)'); // Word doc div
+      
       if (val) {
         document.documentElement.classList.add('dark-mode');
         document.body.classList.add('dark-mode');
+        pages.forEach(p => p.classList.add('dark-mode-text'));
+        
+        // Dark mode for Word documents
+        if (docDiv) {
+          docDiv.style.backgroundColor = '#2a2a2a';
+          docDiv.style.color = '#ffffff';
+        }
       } else {
         document.documentElement.classList.remove('dark-mode');
         document.body.classList.remove('dark-mode');
+        pages.forEach(p => p.classList.remove('dark-mode-text'));
+        
+        // Light mode for Word documents
+        if (docDiv) {
+          docDiv.style.backgroundColor = '#ffffff';
+          docDiv.style.color = '#1a1a1a';
+        }
       }
     };
 
@@ -460,7 +489,9 @@ const buildHtml = () => `
         
         container.innerHTML = '';
         const docDiv = document.createElement('div');
-        docDiv.style.cssText = 'padding: 24px; max-width: 100%; font-family: Georgia, serif; font-size: 16px; line-height: 1.8; color: #1a1a1a; background: #fff; min-height: 100vh;';
+        const bgColor = window.isDarkMode ? '#2a2a2a' : '#ffffff';
+        const textColor = window.isDarkMode ? '#ffffff' : '#1a1a1a';
+        docDiv.style.cssText = 'padding: 24px; max-width: 100%; font-family: Georgia, serif; font-size: 16px; line-height: 1.8; color: ' + textColor + '; background: ' + bgColor + '; min-height: 100vh;';
         docDiv.innerHTML = result.value;
         container.appendChild(docDiv);
         

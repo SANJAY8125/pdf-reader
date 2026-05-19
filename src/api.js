@@ -4,11 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const GEMINI_API_KEY =
-  process.env.EXPO_PUBLIC_GEMINI_API_KEY ||
-  Constants.expoConfig?.extra?.GEMINI_API_KEY ||
-  Constants.manifest2?.extra?.expoClient?.extra?.GEMINI_API_KEY ||
-  Constants.manifest?.extra?.GEMINI_API_KEY;
+const GEMINI_API_KEY = Constants.expoConfig?.extra?.GEMINI_API_KEY || Constants.manifest?.extra?.GEMINI_API_KEY;
 console.log('GEMINI KEY present:', !!GEMINI_API_KEY, 'length:', GEMINI_API_KEY?.length);
 
 // Memory caches
