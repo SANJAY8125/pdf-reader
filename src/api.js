@@ -260,7 +260,7 @@ Surrounding Context: "${trimmedContext}"`;
   const makeRequest = async (retries) => {
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${GEMINI_API_KEY}`,
         {
           method: 'POST',
           headers: {
