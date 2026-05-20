@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const GEMINI_API_KEY = Constants.expoConfig?.extra?.GEMINI_API_KEY || Constants.manifest?.extra?.GEMINI_API_KEY;
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || Constants.expoConfig?.extra?.GEMINI_API_KEY || Constants.manifest?.extra?.GEMINI_API_KEY;
 console.log('GEMINI KEY present:', !!GEMINI_API_KEY, 'length:', GEMINI_API_KEY?.length);
 
 // Memory caches
@@ -12,7 +12,7 @@ let dictCacheMemory = null;
 let aiCacheMemory = null;
 let memoryDictionary = null; // Lazy loaded offline dictionary
 
-const DICT_CACHE_KEY = '@dict_cache';
+const DICT_CACHE_KEY = '@dict_cache_v2';
 const AI_CACHE_KEY = '@ai_explanations_cache';
 const MAX_CACHE_SIZE = 100; // Limit AsyncStorage cache items
 
@@ -98,6 +98,7 @@ const IRREGULAR_VERBS = {
   led: 'lead', read: 'read',
   held: 'hold', sold: 'sell',
   told: 'tell', fell: 'fall', fallen: 'fall',
+  heard: 'hear',
 };
 
 const lemmatize = (word) => {
@@ -150,13 +151,64 @@ export const lookupWord = async (word) => {
   if (dictCacheMemory[cleanWord]) return dictCacheMemory[cleanWord];
   if (baseWord !== cleanWord && dictCacheMemory[baseWord]) return dictCacheMemory[baseWord];
 
-  let result = "No definition found. Try AI explanation.";
+  let result = null;
   const dict = await getDictionary();
 
-  // Try original word first, then lemmatized base
-  const entry = (dict && dict[cleanWord]) || (dict && dict[baseWord]);
+  // 1. Try offline dictionary first
+  let entry = dict && dict[cleanWord];
+  let baseEntry = baseWord !== cleanWord ? (dict && dict[baseWord]) : null;
+
   if (entry) {
     result = entry.replace(/(?:\s+|^)(\d+\.)\s/g, '\n$1 ').trim();
+    
+    // Smart chaining: If definition is just a cross-reference, fetch the root word
+    if (result.length < 80 && (result.includes(" of ") || result.includes("See "))) {
+      const match = result.match(/(?:of|See)\s+([a-zA-Z]+)/i);
+      let targetWord = match ? match[1].toLowerCase() : baseWord;
+      let targetEntry = dict && dict[targetWord];
+      
+      // Fallback to baseWord if regex extraction failed but baseEntry exists
+      if (!targetEntry && baseEntry) {
+        targetWord = baseWord;
+        targetEntry = baseEntry;
+      }
+      
+      if (targetEntry && targetWord !== cleanWord) {
+        result += "\n\n[" + targetWord + "]: " + targetEntry.replace(/(?:\s+|^)(\d+\.)\s/g, '\n$1 ').trim();
+      }
+    }
+  } else if (baseEntry) {
+    result = baseEntry.replace(/(?:\s+|^)(\d+\.)\s/g, '\n$1 ').trim();
+  } else {
+    // 2. Fallback to Free Dictionary API
+    if (await checkNetwork()) {
+      try {
+        // Try original word first, then base word if it fails
+        let response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${cleanWord}`);
+        if (!response.ok && cleanWord !== baseWord) {
+          response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${baseWord}`);
+        }
+        
+        if (response.ok) {
+          const data = await response.json();
+          const meanings = data[0]?.meanings || [];
+          if (meanings.length > 0) {
+            result = meanings.map(m => {
+              const pos = m.partOfSpeech;
+              const def = m.definitions[0]?.definition;
+              return `[${pos}] ${def}`;
+            }).join('\n');
+          }
+        }
+      } catch (err) {
+        console.error("Free Dictionary API error:", err);
+      }
+    }
+  }
+
+  // 3. Fallback to AI Prompt
+  if (!result) {
+    result = "No definition found. Try AI explanation.";
   }
 
   dictCacheMemory[baseWord] = result;
