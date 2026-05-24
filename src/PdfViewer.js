@@ -217,6 +217,7 @@ const buildHtml = () => `
     let pinchFinalScale = 1;
     let pinchAnchorPage = 1;
     let pinchAnchorOffsetWithinPage = 0;
+    let pinchAnchorOffsetXFromCenter = 0;
 
     document.addEventListener('touchstart', (e) => {
       if (e.touches.length === 2) {
@@ -233,6 +234,8 @@ const buildHtml = () => `
 
         // Record which page and how far into it the pinch midpoint is
         const anchorDocY = pinchScrollYAtStart + pinchScreenMidY;
+        const anchorDocX = window.scrollX + pinchScreenMidX;
+        pinchAnchorOffsetXFromCenter = anchorDocX - (container.offsetWidth / 2);
         const pageDivs = container.querySelectorAll('.page');
         pinchAnchorPage = 1;
         pinchAnchorOffsetWithinPage = 0;
@@ -283,9 +286,10 @@ const buildHtml = () => `
       // Re-render at new zoom — scroll so anchor page stays at same screen position
       const zoomRatio = finalZoom / pinchStartZoom;
       const scaledOffset = pinchAnchorOffsetWithinPage * zoomRatio;
+      const scaledOffsetXFromCenter = pinchAnchorOffsetXFromCenter * zoomRatio;
 
       // Do NOT clear transform here, wait for buildPlaceholders to append new divs
-      buildPlaceholders(pinchAnchorPage, pinchScreenMidY, true, scaledOffset);
+      buildPlaceholders(pinchAnchorPage, pinchScreenMidY, true, scaledOffset, scaledOffsetXFromCenter, pinchScreenMidX);
 
       pinchStartDist = null;
       pinchFinalScale = 1;
@@ -491,7 +495,7 @@ const buildHtml = () => `
         const docDiv = document.createElement('div');
         const bgColor = window.isDarkMode ? '#2a2a2a' : '#ffffff';
         const textColor = window.isDarkMode ? '#ffffff' : '#1a1a1a';
-        docDiv.style.cssText = `padding: 24px; max - width: 100 %; font - family: Georgia, serif; font - size: 16px; line - height: 1.8; color: ${ textColor }; background: ${ bgColor }; min - height: 100vh; `;
+        docDiv.style.cssText = 'padding: 24px; max-width: 100%; font-family: Georgia, serif; font-size: 16px; line-height: 1.8; color: ' + textColor + '; background: ' + bgColor + '; min-height: 100vh;';
         container.appendChild(docDiv);
         
         totalPages = 1;
@@ -502,7 +506,7 @@ const buildHtml = () => `
       }
     };
 
-    async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, anchorOffset = 0) {
+    async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, anchorOffset = 0, scaledOffsetXFromCenter = 0, screenMidX = 0) {
       try {
         let ww = window.innerWidth;
         if (!ww || ww <= 0) ww = document.documentElement.clientWidth || window.screen.width || 400;
@@ -553,7 +557,9 @@ const buildHtml = () => `
           const targetDiv = container.querySelector('[data-page-num="' + initialPage + '"]');
           if (targetDiv) {
             const targetScrollY = targetDiv.offsetTop + anchorOffset - startScrollY;
-            window.scrollTo(0, Math.max(0, targetScrollY));
+            const newAnchorDocX = (container.offsetWidth / 2) + scaledOffsetXFromCenter;
+            const targetScrollX = newAnchorDocX - screenMidX;
+            window.scrollTo(Math.max(0, targetScrollX), Math.max(0, targetScrollY));
           }
         } else {
           postRN({ type: 'done_loading' });
