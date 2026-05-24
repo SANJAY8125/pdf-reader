@@ -2,14 +2,15 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
+import { pdfJsBase64, pdfWorkerJsBase64, mammothJsBase64 } from './assets/offlineScripts';
 
 const buildHtml = () => `
 <!DOCTYPE html>
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <script src="data:application/javascript;base64,${pdfJsBase64}"></script>
+  <script src="data:application/javascript;base64,${mammothJsBase64}"></script>
   <style>
     * { box-sizing: border-box; }
 
@@ -213,10 +214,12 @@ const buildHtml = () => `
     let pinchStartZoom = 1;
     let pinchScreenMidX = 0;
     let pinchScreenMidY = 0;
-    let pinchScrollYAtStart = 0;
+    let pinchCurrentMidX = 0;
+    let pinchCurrentMidY = 0;
     let pinchFinalScale = 1;
     let pinchAnchorPage = 1;
-    let pinchAnchorOffsetWithinPage = 0;
+    let pinchAnchorOffsetWithinPageY = 0;
+    let pinchAnchorOffsetWithinPageX = 0;
 
     document.addEventListener('touchstart', (e) => {
       if (e.touches.length === 2) {
@@ -226,27 +229,42 @@ const buildHtml = () => `
           e.touches[0].clientY - e.touches[1].clientY
         );
         pinchStartZoom = zoom;
-        pinchScrollYAtStart = window.scrollY;
         pinchScreenMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         pinchScreenMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        pinchCurrentMidX = pinchScreenMidX;
+        pinchCurrentMidY = pinchScreenMidY;
         pinchFinalScale = 1;
 
-        // Record which page and how far into it the pinch midpoint is
-        const anchorDocY = pinchScrollYAtStart + pinchScreenMidY;
+        const anchorDocX = window.scrollX + pinchScreenMidX;
+        const anchorDocY = window.scrollY + pinchScreenMidY;
+        
         const pageDivs = container.querySelectorAll('.page');
         pinchAnchorPage = 1;
-        pinchAnchorOffsetWithinPage = 0;
+        pinchAnchorOffsetWithinPageY = 0;
+        pinchAnchorOffsetWithinPageX = 0;
         pageDivs.forEach(div => {
           const top = div.offsetTop;
-          if (anchorDocY >= top) {
+          const left = div.offsetLeft;
+          const bottom = top + div.offsetHeight;
+          if (anchorDocY >= top && anchorDocY <= bottom) {
             pinchAnchorPage = parseInt(div.dataset.pageNum, 10);
-            pinchAnchorOffsetWithinPage = anchorDocY - top;
+            pinchAnchorOffsetWithinPageY = anchorDocY - top;
+            pinchAnchorOffsetWithinPageX = anchorDocX - left;
           }
         });
 
-        const originX = pinchScreenMidX;
-        const originY = anchorDocY;
-        container.style.transformOrigin = originX + 'px ' + originY + 'px';
+        // Fallback if touched completely outside pages (e.g. huge margin)
+        if (pinchAnchorOffsetWithinPageY === 0 && pinchAnchorOffsetWithinPageX === 0) {
+          pageDivs.forEach(div => {
+            if (anchorDocY >= div.offsetTop) {
+              pinchAnchorPage = parseInt(div.dataset.pageNum, 10);
+              pinchAnchorOffsetWithinPageY = anchorDocY - div.offsetTop;
+              pinchAnchorOffsetWithinPageX = anchorDocX - div.offsetLeft;
+            }
+          });
+        }
+
+        container.style.transformOrigin = anchorDocX + 'px ' + anchorDocY + 'px';
       }
     }, { passive: false });
 
@@ -259,7 +277,19 @@ const buildHtml = () => `
         );
         pinchFinalScale = currentDist / pinchStartDist;
         const clampedScale = Math.max(MIN_ZOOM / pinchStartZoom, Math.min(MAX_ZOOM / pinchStartZoom, pinchFinalScale));
-        container.style.transform = 'scale(' + clampedScale + ')';
+        
+        pinchCurrentMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        pinchCurrentMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        
+        const anchorDocX = window.scrollX + pinchScreenMidX;
+        const anchorDocY = window.scrollY + pinchScreenMidY;
+        const currentDocX = window.scrollX + pinchCurrentMidX;
+        const currentDocY = window.scrollY + pinchCurrentMidY;
+        
+        const panX = currentDocX - anchorDocX;
+        const panY = currentDocY - anchorDocY;
+        
+        container.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + clampedScale + ')';
       }
     }, { passive: false });
 
@@ -269,7 +299,7 @@ const buildHtml = () => `
       const clampedScale = Math.max(MIN_ZOOM / pinchStartZoom, Math.min(MAX_ZOOM / pinchStartZoom, pinchFinalScale));
       const finalZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinchStartZoom * clampedScale));
 
-      if (Math.abs(finalZoom - pinchStartZoom) < 0.05) {
+      if (Math.abs(finalZoom - pinchStartZoom) < 0.05 && Math.abs(pinchCurrentMidX - pinchScreenMidX) < 10 && Math.abs(pinchCurrentMidY - pinchScreenMidY) < 10) {
         // No meaningful zoom change
         container.style.transform = 'none';
         container.style.transformOrigin = '0px 0px';
@@ -278,14 +308,18 @@ const buildHtml = () => `
         return;
       }
 
+      // Calculate exact fractions to avoid any rounding errors
+      const oldTargetDiv = container.querySelector('[data-page-num="' + pinchAnchorPage + '"]');
+      let fractionY = 0;
+      let fractionX = 0;
+      if (oldTargetDiv && oldTargetDiv.offsetHeight > 0) {
+        fractionY = pinchAnchorOffsetWithinPageY / oldTargetDiv.offsetHeight;
+        fractionX = pinchAnchorOffsetWithinPageX / oldTargetDiv.offsetWidth;
+      }
+
       zoom = finalZoom;
 
-      // Re-render at new zoom — scroll so anchor page stays at same screen position
-      const zoomRatio = finalZoom / pinchStartZoom;
-      const scaledOffset = pinchAnchorOffsetWithinPage * zoomRatio;
-
-      // Do NOT clear transform here, wait for buildPlaceholders to append new divs
-      buildPlaceholders(pinchAnchorPage, pinchScreenMidY, true, scaledOffset);
+      buildPlaceholders(pinchAnchorPage, pinchCurrentMidY, true, fractionY, pinchCurrentMidX, fractionX);
 
       pinchStartDist = null;
       pinchFinalScale = 1;
@@ -296,9 +330,9 @@ const buildHtml = () => `
     window.onerror = function(msg, src, line) { postRN({ type: 'log', message: 'Error: ' + msg + ' at ' + line }); };
 
     if (typeof pdfjsLib === 'undefined') {
-      postRN({ type: 'log', message: 'pdfjsLib undefined - CDN failed!' });
+      postRN({ type: 'log', message: 'pdfjsLib undefined - offline load failed!' });
     } else {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'data:application/javascript;base64,${pdfWorkerJsBase64}';
       postRN({ type: 'ready' });
     }
 
@@ -503,13 +537,20 @@ const buildHtml = () => `
       }
     };
 
-    async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, anchorOffset = 0) {
+    async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, fractionY = 0, startScrollX = 0, fractionX = 0) {
       try {
         let ww = window.innerWidth;
         if (!ww || ww <= 0) ww = document.documentElement.clientWidth || window.screen.width || 400;
         let wh = window.innerHeight;
         if (!wh || wh <= 0) wh = document.documentElement.clientHeight || window.screen.height || 800;
         const isLandscape = ww > wh;
+
+        // Fetch all page viewports in parallel for accurate placeholder sizes
+        const pageViewports = await Promise.all(
+          Array.from({ length: pdfDoc.numPages }, (_, i) =>
+            pdfDoc.getPage(i + 1).then(page => page.getViewport({ scale: 1 }))
+          )
+        );
 
         if (isZoomRefresh) {
           observer.disconnect();
@@ -528,13 +569,6 @@ const buildHtml = () => `
           container.style.transformOrigin = '0px 0px';
         }
 
-        // Fetch all page viewports in parallel for accurate placeholder sizes
-        const pageViewports = await Promise.all(
-          Array.from({ length: pdfDoc.numPages }, (_, i) =>
-            pdfDoc.getPage(i + 1).then(page => page.getViewport({ scale: 1 }))
-          )
-        );
-
         for (let i = 0; i < pdfDoc.numPages; i++) {
           const vp = pageViewports[i];
           const fitScale = ww / vp.width;
@@ -542,9 +576,11 @@ const buildHtml = () => `
 
           const div = document.createElement('div');
           div.className = 'page';
+          if (window.isDarkMode) div.classList.add('dark-mode-text');
           div.dataset.pageNum = i + 1;
           div.style.width = Math.round(vp.width * initScale) + 'px';
           div.style.height = Math.round(vp.height * initScale) + 'px';
+          div.style.marginBottom = Math.round(2 * zoom) + 'px';
           div.innerHTML = '<div class="page-placeholder">Page ' + (i + 1) + '</div>';
           container.appendChild(div);
           observer.observe(div);
@@ -553,8 +589,16 @@ const buildHtml = () => `
         if (isZoomRefresh) {
           const targetDiv = container.querySelector('[data-page-num="' + initialPage + '"]');
           if (targetDiv) {
-            const targetScrollY = targetDiv.offsetTop + anchorOffset - startScrollY;
-            window.scrollTo(0, Math.max(0, targetScrollY));
+            const applyScroll = () => {
+              const targetScrollY = targetDiv.offsetTop + (targetDiv.offsetHeight * fractionY) - startScrollY;
+              const targetScrollX = targetDiv.offsetLeft + (targetDiv.offsetWidth * fractionX) - startScrollX;
+              window.scrollTo(Math.max(0, targetScrollX), Math.max(0, targetScrollY));
+            };
+            applyScroll();
+            requestAnimationFrame(() => {
+              applyScroll();
+              setTimeout(applyScroll, 50);
+            });
           }
         } else {
           postRN({ type: 'done_loading' });
