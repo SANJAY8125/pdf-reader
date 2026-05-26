@@ -232,6 +232,12 @@ export default function App() {
     }
   }, [openFile]);
 
+  // Handle thumbnail posted from WebView
+  const handleThumbnail = useCallback(async (base64, uri) => {
+    const path = await saveThumbnail(uri, base64);
+    if (path) setThumbnails(prev => ({ ...prev, [uri]: path + '?t=' + Date.now() }));
+  }, []);
+
   const onProgress = useCallback(async ({ page, scrollY, totalPages: tp, thumbnail }) => {
     if (thumbnail && activePdf?.uri) {
       handleThumbnail(thumbnail, activePdf.uri);
@@ -251,13 +257,7 @@ export default function App() {
     };
     await saveToHistory(updatedEntry);
     await setLastSession(updatedEntry);
-  }, [activePdf, currentPage, totalPages, currentScrollY]);
-
-  // Handle thumbnail posted from WebView
-  const handleThumbnail = useCallback(async (base64, uri) => {
-    const path = await saveThumbnail(uri, base64);
-    if (path) setThumbnails(prev => ({ ...prev, [uri]: path + '?t=' + Date.now() }));
-  }, []);
+  }, [activePdf, currentPage, totalPages, currentScrollY, handleThumbnail]);
 
   const handleCopy = useCallback(async (text) => {
     try { await Clipboard.setStringAsync(text); } catch (e) {}
@@ -473,10 +473,7 @@ export default function App() {
         onAction={handleAction}
         onCopy={handleCopy}
         onProgress={onProgress}
-        onMessage={(event) => {
-          const data = handleMessage(event);
-          // existing message handling already in PdfViewer
-        }}
+        onMessage={undefined}
       />
 
       {showHeader && (

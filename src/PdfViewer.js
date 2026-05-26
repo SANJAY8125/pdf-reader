@@ -59,8 +59,15 @@ const buildHtml = () => `
       color: #ffffff;
     }
 
+    /*
+      Dark mode canvas filter strategy:
+       1. grayscale(1)  — strip all color; images become true b&w before inversion
+       2. invert(1)     — flip lightness: white page → dark bg, black text → white
+       3. brightness/contrast tweak for comfortable reading
+      Images end up in inverted-grayscale (recognisable b&w) instead of color-inverted (weird).
+    */
     .page.dark-mode-text canvas {
-      filter: invert(100%) hue-rotate(180deg) brightness(1.1) contrast(1.1);
+      filter: grayscale(1) invert(1) brightness(1.05) contrast(1.1);
     }
 
     .page.dark-mode-text .textLayer > span {
@@ -123,8 +130,11 @@ const buildHtml = () => `
       right: 0;
       bottom: 0;
       overflow: hidden;
-      opacity: 1;                /* 🔥 MAIN FIX */
-      pointer-events: auto;      /* keep selection working */
+      opacity: 1;
+      /* Enabling pointer-events on the container lets native selection drag smoothly over empty gaps */
+      pointer-events: auto;
+      -webkit-user-select: text;
+      user-select: text;
       color: transparent;
       line-height: 1.0;
       transform: none !important;
@@ -136,6 +146,8 @@ const buildHtml = () => `
       white-space: pre;
       cursor: text;
       transform-origin: 0% 0%;
+      /* Spans themselves ARE selectable – only the empty gaps between them are not */
+      pointer-events: auto;
     }
     ::selection { background: rgba(30, 100, 220, 0.5); }
     .textLayer > span::selection { background: rgba(30, 100, 220, 0.5); }
@@ -214,10 +226,10 @@ const buildHtml = () => `
     let pinchScreenMidX = 0;
     let pinchScreenMidY = 0;
     let pinchScrollYAtStart = 0;
+    let pinchScrollXAtStart = 0;
     let pinchFinalScale = 1;
     let pinchAnchorPage = 1;
     let pinchAnchorOffsetWithinPage = 0;
-    let pinchAnchorOffsetXFromCenter = 0;
 
     document.addEventListener('touchstart', (e) => {
       if (e.touches.length === 2) {
@@ -228,14 +240,13 @@ const buildHtml = () => `
         );
         pinchStartZoom = zoom;
         pinchScrollYAtStart = window.scrollY;
+        pinchScrollXAtStart = window.scrollX;
         pinchScreenMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         pinchScreenMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         pinchFinalScale = 1;
 
         // Record which page and how far into it the pinch midpoint is
         const anchorDocY = pinchScrollYAtStart + pinchScreenMidY;
-        const anchorDocX = window.scrollX + pinchScreenMidX;
-        pinchAnchorOffsetXFromCenter = anchorDocX - (container.offsetWidth / 2);
         const pageDivs = container.querySelectorAll('.page');
         pinchAnchorPage = 1;
         pinchAnchorOffsetWithinPage = 0;
@@ -247,7 +258,7 @@ const buildHtml = () => `
           }
         });
 
-        const originX = pinchScreenMidX;
+        const originX = pinchScrollXAtStart + pinchScreenMidX;
         const originY = anchorDocY;
         container.style.transformOrigin = originX + 'px ' + originY + 'px';
       }
@@ -283,13 +294,15 @@ const buildHtml = () => `
 
       zoom = finalZoom;
 
-      // Re-render at new zoom — scroll so anchor page stays at same screen position
+      // Re-render at new zoom — scroll so the pinch midpoint stays fixed on screen.
+      // Correct formula: newScrollX = anchorDocX * zoomRatio - screenMidX
       const zoomRatio = finalZoom / pinchStartZoom;
-      const scaledOffset = pinchAnchorOffsetWithinPage * zoomRatio;
-      const scaledOffsetXFromCenter = pinchAnchorOffsetXFromCenter * zoomRatio;
+      const scaledOffsetY = pinchAnchorOffsetWithinPage * zoomRatio;
+      // anchorDocX is the document X under the pinch midpoint at start
+      const anchorDocX = pinchScrollXAtStart + pinchScreenMidX;
+      const targetScrollX = anchorDocX * zoomRatio - pinchScreenMidX;
 
-      // Do NOT clear transform here, wait for buildPlaceholders to append new divs
-      buildPlaceholders(pinchAnchorPage, pinchScreenMidY, true, scaledOffset, scaledOffsetXFromCenter, pinchScreenMidX);
+      buildPlaceholders(pinchAnchorPage, pinchScreenMidY, true, scaledOffsetY, targetScrollX);
 
       pinchStartDist = null;
       pinchFinalScale = 1;
@@ -469,6 +482,8 @@ const buildHtml = () => `
           thumbCanvas.width = Math.round(thumbVp.width);
           thumbCanvas.height = Math.round(thumbVp.height);
           const thumbCtx = thumbCanvas.getContext('2d');
+          thumbCtx.fillStyle = '#FFFFFF';
+          thumbCtx.fillRect(0, 0, thumbCanvas.width, thumbCanvas.height);
           await thumbPage.render({ canvasContext: thumbCtx, viewport: thumbVp }).promise;
           const thumbBase64 = thumbCanvas.toDataURL('image/png').split(',')[1];
           postRN({ type: 'thumbnail', data: thumbBase64 });
@@ -506,7 +521,7 @@ const buildHtml = () => `
       }
     };
 
-    async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, anchorOffset = 0, scaledOffsetXFromCenter = 0, screenMidX = 0) {
+    async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, anchorOffset = 0, targetScrollX = 0) {
       try {
         let ww = window.innerWidth;
         if (!ww || ww <= 0) ww = document.documentElement.clientWidth || window.screen.width || 400;
@@ -545,6 +560,8 @@ const buildHtml = () => `
 
           const div = document.createElement('div');
           div.className = 'page';
+          // Re-apply dark mode class so zoom rebuilds don't lose dark mode
+          if (window.isDarkMode) div.classList.add('dark-mode-text');
           div.dataset.pageNum = i + 1;
           div.style.width = Math.round(vp.width * initScale) + 'px';
           div.style.height = Math.round(vp.height * initScale) + 'px';
@@ -554,13 +571,15 @@ const buildHtml = () => `
         }
 
         if (isZoomRefresh) {
-          const targetDiv = container.querySelector('[data-page-num="' + initialPage + '"]');
-          if (targetDiv) {
-            const targetScrollY = targetDiv.offsetTop + anchorOffset - startScrollY;
-            const newAnchorDocX = (container.offsetWidth / 2) + scaledOffsetXFromCenter;
-            const targetScrollX = newAnchorDocX - screenMidX;
-            window.scrollTo(Math.max(0, targetScrollX), Math.max(0, targetScrollY));
-          }
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              const targetDiv = container.querySelector('[data-page-num="' + initialPage + '"]');
+              if (targetDiv) {
+                const targetScrollY = targetDiv.offsetTop + anchorOffset - startScrollY;
+                window.scrollTo(Math.max(0, targetScrollX), Math.max(0, targetScrollY));
+              }
+            }, 50);
+          });
         } else {
           postRN({ type: 'done_loading' });
           requestAnimationFrame(() => {
@@ -671,17 +690,73 @@ const buildHtml = () => `
         textDiv.style.left = '0';
 
         const textContent = await page.getTextContent();
-        pdfjsLib.renderTextLayer({
+        const textLayerRenderTask = pdfjsLib.renderTextLayer({
           textContent,
           container: textDiv,
           viewport: cssViewport,
           textDivs: [],
-          enhanceTextSelection: true
+          // false = no invisible overlay divs that cause selection to bleed across lines
+          enhanceTextSelection: false
         });
+        await textLayerRenderTask.promise;
 
         div.innerHTML = ''; 
         div.appendChild(canvas);
         div.appendChild(textDiv);
+
+        // Sort spans visually to establish natural reading and selection order in the DOM
+        // Must be done AFTER appending to DOM so layout coordinates are computed
+        const spans = Array.from(textDiv.querySelectorAll('span'));
+        if (spans.length > 0) {
+          const rects = new Map();
+          for (const span of spans) {
+            rects.set(span, span.getBoundingClientRect());
+          }
+
+          spans.sort((a, b) => rects.get(a).top - rects.get(b).top);
+
+          const lines = [];
+          let currentLine = [];
+          let currentTop = rects.get(spans[0]).top;
+
+          for (const span of spans) {
+            const rect = rects.get(span);
+            const threshold = Math.max(8, rect.height / 2 || 0);
+            if (Math.abs(rect.top - currentTop) < threshold) {
+              currentLine.push(span);
+            } else {
+              lines.push(currentLine);
+              currentLine = [span];
+              currentTop = rect.top;
+            }
+          }
+          if (currentLine.length > 0) {
+            lines.push(currentLine);
+          }
+
+          for (const line of lines) {
+            line.sort((a, b) => rects.get(a).left - rects.get(b).left);
+          }
+
+          // Clear HTML to destroy invisible spaces/newlines injected by PDF.js natively
+          textDiv.innerHTML = '';
+          
+          for (const line of lines) {
+            let prevSpan = null;
+            for (const span of line) {
+              // Deduplicate fake-bold text (same string rendered twice with tiny offset)
+              if (prevSpan && span.textContent.trim() === prevSpan.textContent.trim()) {
+                const r1 = rects.get(prevSpan);
+                const r2 = rects.get(span);
+                if (Math.abs(r1.left - r2.left) < 3 && Math.abs(r1.top - r2.top) < 3) {
+                  continue; // Skip duplicate to prevent overlapping selection highlights
+                }
+              }
+              textDiv.appendChild(span);
+              prevSpan = span;
+            }
+          }
+        }
       } catch(e) {}
     }
 
@@ -718,20 +793,72 @@ const buildHtml = () => `
         if (currentSel) currentSel.removeAllRanges();
         if (document.activeElement) document.activeElement.blur();
         
-        // Force teardrop handles to vanish natively on Android
-        const txtLayers = document.querySelectorAll('.textLayer');
-        txtLayers.forEach(l => l.style.pointerEvents = 'none');
-        setTimeout(() => txtLayers.forEach(l => l.style.pointerEvents = 'auto'), 100);
+        // Force teardrop handles to vanish: briefly disable pointer-events on spans
+        // (textLayer itself is already pointer-events:none by CSS default)
+        const spans = document.querySelectorAll('.textLayer > span');
+        spans.forEach(s => s.style.pointerEvents = 'none');
+        setTimeout(() => spans.forEach(s => s.style.pointerEvents = ''), 120); // '' → restores CSS default (auto)
       }, 50);
     }
 
+    let isClampingSelection = false;
     let toolbarTimer = null;
     document.addEventListener('selectionchange', () => {
+      if (isClampingSelection) return;
+
       clearTimeout(toolbarTimer);
       const sel = window.getSelection();
-      const text = sel ? sel.toString().trim() : '';
+      if (!sel || sel.rangeCount === 0) {
+        toolbar.style.display = 'none';
+        return;
+      }
 
-      if (text.length > 0 && sel.rangeCount > 0) {
+      // Clamp selection to page boundary (prevent selection crossing different text layers)
+      const range = sel.getRangeAt(0);
+      let startTextLayer = null;
+      let node = range.startContainer;
+      while (node && node !== document.body) {
+        if (node.classList && node.classList.contains('textLayer')) {
+          startTextLayer = node;
+          break;
+        }
+        node = node.parentNode;
+      }
+
+      if (startTextLayer) {
+        let endTextLayer = null;
+        let nodeEnd = range.endContainer;
+        while (nodeEnd && nodeEnd !== document.body) {
+          if (nodeEnd.classList && nodeEnd.classList.contains('textLayer')) {
+            endTextLayer = nodeEnd;
+            break;
+          }
+          nodeEnd = nodeEnd.parentNode;
+        }
+
+        if (endTextLayer && endTextLayer !== startTextLayer) {
+          isClampingSelection = true;
+          try {
+            const spans = Array.from(startTextLayer.querySelectorAll('span'));
+            if (spans.length > 0) {
+              const lastSpan = spans[spans.length - 1];
+              const newRange = document.createRange();
+              newRange.setStart(range.startContainer, range.startOffset);
+              if (lastSpan.firstChild) {
+                newRange.setEnd(lastSpan.firstChild, lastSpan.firstChild.textContent.length);
+              } else {
+                newRange.setEndAfter(lastSpan);
+              }
+              sel.removeAllRanges();
+              sel.addRange(newRange);
+            }
+          } catch(e) {}
+          isClampingSelection = false;
+        }
+      }
+
+      const text = sel.toString().trim();
+      if (text.length > 0) {
         toolbarTimer = setTimeout(() => {
           const dictBtn = document.querySelector('.ai-btn.dict');
           if (dictBtn) {
