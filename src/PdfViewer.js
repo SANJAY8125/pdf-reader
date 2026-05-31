@@ -41,12 +41,11 @@ const buildHtml = () => `
       width: max-content;
       display: flex;
       flex-direction: column;
-      align-items: center;
       background-color: var(--container-bg) !important;
       transition: background-color 0.3s;
     }
     .page {
-      margin-bottom: 2px;
+      margin: 0 auto 2px auto;
       position: relative;
       background: var(--page-bg) !important;
       filter: var(--page-filter);
@@ -211,8 +210,8 @@ const buildHtml = () => `
   </div>
   <script>
     let zoom = 1;
-    const MIN_ZOOM = 0.5;
-    const MAX_ZOOM = 3;
+    const MIN_ZOOM = 1;
+    const MAX_ZOOM = 5;
 
     function setZoom(newZoom) {
       if (!pdfDoc) return;
@@ -230,6 +229,14 @@ const buildHtml = () => `
     let pinchFinalScale = 1;
     let pinchAnchorPage = 1;
     let pinchAnchorOffsetWithinPage = 0;
+    let pinchAnchorOffsetX = 0;
+    let pinchCurrentMidX = 0;
+    let pinchCurrentMidY = 0;
+    let pinchStartPageWidth = 0;
+    let pinchStartOffsetLeft = 0;
+    let pinchStartOffsetTop = 0;
+    let pinchStartScrollHeight = 0;
+    let pinchStartContainerWidth = 0;
 
     document.addEventListener('touchstart', (e) => {
       if (e.touches.length === 2) {
@@ -243,6 +250,8 @@ const buildHtml = () => `
         pinchScrollXAtStart = window.scrollX;
         pinchScreenMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         pinchScreenMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        pinchCurrentMidX = pinchScreenMidX;
+        pinchCurrentMidY = pinchScreenMidY;
         pinchFinalScale = 1;
 
         // Record which page and how far into it the pinch midpoint is
@@ -250,30 +259,66 @@ const buildHtml = () => `
         const pageDivs = container.querySelectorAll('.page');
         pinchAnchorPage = 1;
         pinchAnchorOffsetWithinPage = 0;
+        pinchAnchorOffsetX = 0;
+        
+        pinchStartScrollHeight = document.documentElement.scrollHeight;
+        pinchStartContainerWidth = 0;
+
         pageDivs.forEach(div => {
+          if (div.offsetWidth > pinchStartContainerWidth) {
+            pinchStartContainerWidth = div.offsetWidth;
+          }
           const top = div.offsetTop;
           if (anchorDocY >= top) {
             pinchAnchorPage = parseInt(div.dataset.pageNum, 10);
             pinchAnchorOffsetWithinPage = anchorDocY - top;
+            pinchAnchorOffsetX = (pinchScrollXAtStart + pinchScreenMidX) - div.offsetLeft;
+            pinchStartPageWidth = div.offsetWidth;
+            pinchStartOffsetLeft = div.offsetLeft;
+            pinchStartOffsetTop = div.offsetTop;
           }
         });
-
-        const originX = pinchScrollXAtStart + pinchScreenMidX;
-        const originY = anchorDocY;
-        container.style.transformOrigin = originX + 'px ' + originY + 'px';
       }
     }, { passive: false });
 
     document.addEventListener('touchmove', (e) => {
       if (e.touches.length === 2 && pinchStartDist) {
         e.preventDefault();
+        pinchCurrentMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        pinchCurrentMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        
         const currentDist = Math.hypot(
           e.touches[0].clientX - e.touches[1].clientX,
           e.touches[0].clientY - e.touches[1].clientY
         );
+        
         pinchFinalScale = currentDist / pinchStartDist;
         const clampedScale = Math.max(MIN_ZOOM / pinchStartZoom, Math.min(MAX_ZOOM / pinchStartZoom, pinchFinalScale));
-        container.style.transform = 'scale(' + clampedScale + ')';
+
+        const ww = document.documentElement.clientWidth || window.innerWidth || 400;
+        const wh = window.innerHeight || document.documentElement.clientHeight || 800;
+
+        const currentExpectedPageWidth = pinchStartPageWidth * clampedScale;
+        const currentExpectedContainerWidth = Math.max(ww, pinchStartContainerWidth * clampedScale);
+        const currentExpectedOffsetLeft = (currentExpectedContainerWidth - currentExpectedPageWidth) / 2;
+
+        const scaledOffsetX = pinchAnchorOffsetX * clampedScale;
+        const targetScrollX = currentExpectedOffsetLeft + scaledOffsetX - pinchCurrentMidX;
+        const maxScrollX = Math.max(0, currentExpectedContainerWidth - ww);
+        const clampedScrollX = Math.max(0, Math.min(maxScrollX, targetScrollX));
+
+        const currentExpectedOffsetTop = pinchStartOffsetTop * clampedScale;
+        const scaledOffsetY = pinchAnchorOffsetWithinPage * clampedScale;
+        const targetScrollY = currentExpectedOffsetTop + scaledOffsetY - pinchCurrentMidY;
+        const currentExpectedScrollHeight = pinchStartScrollHeight * clampedScale;
+        const maxScrollY = Math.max(0, currentExpectedScrollHeight - wh);
+        const clampedScrollY = Math.max(0, Math.min(maxScrollY, targetScrollY));
+
+        const tx = currentExpectedOffsetLeft - clampedScrollX + pinchScrollXAtStart - (pinchStartOffsetLeft * clampedScale);
+        const ty = pinchScrollYAtStart - clampedScrollY;
+
+        container.style.transformOrigin = '0px 0px';
+        container.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(' + clampedScale + ')';
       }
     }, { passive: false });
 
@@ -295,14 +340,11 @@ const buildHtml = () => `
       zoom = finalZoom;
 
       // Re-render at new zoom — scroll so the pinch midpoint stays fixed on screen.
-      // Correct formula: newScrollX = anchorDocX * zoomRatio - screenMidX
       const zoomRatio = finalZoom / pinchStartZoom;
       const scaledOffsetY = pinchAnchorOffsetWithinPage * zoomRatio;
-      // anchorDocX is the document X under the pinch midpoint at start
-      const anchorDocX = pinchScrollXAtStart + pinchScreenMidX;
-      const targetScrollX = anchorDocX * zoomRatio - pinchScreenMidX;
+      const scaledOffsetX = pinchAnchorOffsetX * zoomRatio;
 
-      buildPlaceholders(pinchAnchorPage, pinchScreenMidY, true, scaledOffsetY, targetScrollX);
+      buildPlaceholders(pinchAnchorPage, pinchCurrentMidY, true, scaledOffsetY, scaledOffsetX, pinchCurrentMidX);
 
       pinchStartDist = null;
       pinchFinalScale = 1;
@@ -521,17 +563,15 @@ const buildHtml = () => `
       }
     };
 
-    async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, anchorOffset = 0, targetScrollX = 0) {
+    async function buildPlaceholders(initialPage, startScrollY, isZoomRefresh = false, anchorOffsetY = 0, anchorOffsetX = 0, screenMidX = 0) {
       try {
-        let ww = window.innerWidth;
-        if (!ww || ww <= 0) ww = document.documentElement.clientWidth || window.screen.width || 400;
-        let wh = window.innerHeight;
-        if (!wh || wh <= 0) wh = document.documentElement.clientHeight || window.screen.height || 800;
+        let ww = document.documentElement.clientWidth || window.innerWidth || window.screen.width || 400;
+        let wh = window.innerHeight || document.documentElement.clientHeight || window.screen.height || 800;
         const isLandscape = ww > wh;
 
         if (isZoomRefresh) {
           observer.disconnect();
-          container.innerHTML = '';
+          // We DO NOT clear container.innerHTML here anymore to prevent the "reload" flash
           renderQueue.clear();
 
           if (pdfDoc.numPages === 1) {
@@ -541,9 +581,6 @@ const buildHtml = () => `
             container.style.justifyContent = 'flex-start';
             container.style.minHeight = '';
           }
-
-          container.style.transform = 'none';
-          container.style.transformOrigin = '0px 0px';
         }
 
         // Fetch all page viewports in parallel for accurate placeholder sizes
@@ -553,33 +590,52 @@ const buildHtml = () => `
           )
         );
 
+        if (isZoomRefresh) {
+          container.style.transform = 'none';
+          container.style.transformOrigin = '0px 0px';
+        }
+
         for (let i = 0; i < pdfDoc.numPages; i++) {
           const vp = pageViewports[i];
           const fitScale = ww / vp.width;
           const initScale = (isLandscape ? Math.min(fitScale, 0.9) : Math.min(fitScale, 1.2)) * zoom;
 
-          const div = document.createElement('div');
-          div.className = 'page';
-          // Re-apply dark mode class so zoom rebuilds don't lose dark mode
-          if (window.isDarkMode) div.classList.add('dark-mode-text');
-          div.dataset.pageNum = i + 1;
-          div.style.width = Math.round(vp.width * initScale) + 'px';
-          div.style.height = Math.round(vp.height * initScale) + 'px';
-          div.innerHTML = '<div class="page-placeholder">Page ' + (i + 1) + '</div>';
-          container.appendChild(div);
-          observer.observe(div);
+          if (isZoomRefresh) {
+            const div = container.querySelector('[data-page-num="' + (i + 1) + '"]');
+            if (div) {
+              div.style.width = Math.round(vp.width * initScale) + 'px';
+              div.style.height = Math.round(vp.height * initScale) + 'px';
+              delete div.dataset.rendered;
+              observer.observe(div);
+            }
+          } else {
+            const div = document.createElement('div');
+            div.className = 'page';
+            // Re-apply dark mode class so zoom rebuilds don't lose dark mode
+            if (window.isDarkMode) div.classList.add('dark-mode-text');
+            div.dataset.pageNum = i + 1;
+            div.style.width = Math.round(vp.width * initScale) + 'px';
+            div.style.height = Math.round(vp.height * initScale) + 'px';
+            div.innerHTML = '<div class="page-placeholder">Page ' + (i + 1) + '</div>';
+            container.appendChild(div);
+            observer.observe(div);
+          }
         }
 
         if (isZoomRefresh) {
-          requestAnimationFrame(() => {
-            setTimeout(() => {
-              const targetDiv = container.querySelector('[data-page-num="' + initialPage + '"]');
-              if (targetDiv) {
-                const targetScrollY = targetDiv.offsetTop + anchorOffset - startScrollY;
-                window.scrollTo(Math.max(0, targetScrollX), Math.max(0, targetScrollY));
-              }
-            }, 50);
-          });
+          // Force reflow to ensure WebView has updated flexbox layout before querying offsets
+          void container.offsetWidth;
+
+          const targetDiv = container.querySelector('[data-page-num="' + initialPage + '"]');
+          if (targetDiv) {
+            const targetScrollY = targetDiv.offsetTop + (anchorOffsetY || 0) - (startScrollY || 0);
+            const targetScrollX = targetDiv.offsetLeft + (anchorOffsetX || 0) - (screenMidX || 0);
+            
+            const maxScrollX = Math.max(0, document.documentElement.scrollWidth - ww);
+            const clampedScrollX = Math.max(0, Math.min(maxScrollX, targetScrollX));
+            
+            window.scrollTo(clampedScrollX, Math.max(0, targetScrollY));
+          }
         } else {
           postRN({ type: 'done_loading' });
           requestAnimationFrame(() => {
