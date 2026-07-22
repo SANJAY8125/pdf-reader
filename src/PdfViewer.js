@@ -33,6 +33,7 @@ const buildHtml = () => `
       overflow-x: auto;
       overflow-anchor: none;
       scroll-behavior: auto !important;
+      -webkit-overflow-scrolling: touch;
       font-family: sans-serif;
       transition: background-color 0.3s;
     }
@@ -43,6 +44,7 @@ const buildHtml = () => `
       flex-direction: column;
       background-color: var(--container-bg) !important;
       transition: background-color 0.3s;
+      will-change: transform;
     }
     .page {
       margin: 0 auto 2px auto;
@@ -51,6 +53,9 @@ const buildHtml = () => `
       filter: var(--page-filter);
       overflow: hidden;
       transition: filter 0.3s, background-color 0.3s;
+      will-change: transform;
+      transform: translateZ(0);
+      backface-visibility: hidden;
     }
 
     .page.dark-mode-text {
@@ -120,6 +125,8 @@ const buildHtml = () => `
     canvas {
       display: block;
       image-rendering: -webkit-optimize-contrast;
+      will-change: transform;
+      transform: translateZ(0);
     }
 
     .textLayer {
@@ -474,16 +481,22 @@ const buildHtml = () => `
     }
 
     let ticking = false;
+    let lastProgressReport = 0;
     window.addEventListener('scroll', () => {
       if (!ticking) {
         window.requestAnimationFrame(() => {
           updateThumbPosition();
-          checkAndReportProgress();
+          // Throttle progress reports to React Native to reduce bridge overhead
+          const now = Date.now();
+          if (now - lastProgressReport > 150) {
+            checkAndReportProgress();
+            lastProgressReport = now;
+          }
           ticking = false;
         });
         ticking = true;
       }
-    });
+    }, { passive: true });
 
     // Handle Orientation Resize safely. Removed aggressive resize re-render logic.
     let resizeTimer = null;
@@ -676,7 +689,8 @@ const buildHtml = () => `
           }
         } else { renderQueue.delete(num); }
       });
-    }, { root: null, rootMargin: '100% 0px' });
+    // Pre-render 200% above and below viewport so pages are ready before user reaches them
+    }, { root: null, rootMargin: '200% 0px' });
 
     async function processRenderQueue() {
       if (isRendering || renderQueue.size === 0) return;
@@ -721,7 +735,8 @@ const buildHtml = () => `
         div.style.height = Math.round(cssViewport.height) + 'px';
         
         const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
+        // alpha:false lets the browser skip compositing the transparent background — faster rendering
+        const ctx = canvas.getContext('2d', { alpha: false });
         canvas.width  = Math.max(1, Math.round(cssViewport.width * dpr));
         canvas.height = Math.max(1, Math.round(cssViewport.height * dpr));
         canvas.style.position = 'absolute';
