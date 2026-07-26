@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Linking } from 'react-native';
 import {
   StyleSheet, Text, View, TouchableOpacity, SafeAreaView,
   ActivityIndicator, ScrollView, FlatList, Image,
@@ -104,6 +105,39 @@ export default function App() {
     setThumbnails(prev => ({ ...prev, ...thumbMap }));
   }, []);
 
+  // Helper: open a PDF from a content:// or file:// URI received via intent
+  const openFromIntentUri = useCallback(async (url) => {
+    if (!url) return;
+    try {
+      // Copy to permanent app storage so the URI survives
+      const fileName = url.split('/').pop()?.split('?')[0] || 'shared.pdf';
+      const safeName = decodeURIComponent(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const permanentDir = FileSystem.documentDirectory + 'pdfs/';
+      await FileSystem.makeDirectoryAsync(permanentDir, { intermediates: true });
+      const permanentUri = permanentDir + safeName;
+      try {
+        await FileSystem.copyAsync({ from: url, to: permanentUri });
+      } catch (e) {
+        // If copy fails use original uri
+      }
+      const finalUri = permanentUri;
+      const isDocx = safeName.toLowerCase().endsWith('.docx') || safeName.toLowerCase().endsWith('.doc');
+      const pdfEntry = {
+        uri: finalUri,
+        name: decodeURIComponent(fileName),
+        lastPage: 1,
+        scrollY: 0,
+        totalPages: 0,
+        lastAccessed: Date.now(),
+        fileType: isDocx ? 'docx' : 'pdf',
+      };
+      await saveToHistory(pdfEntry);
+      openFile(pdfEntry);
+    } catch (err) {
+      console.log('Intent open error:', err);
+    }
+  }, [openFile]);
+
   useEffect(() => {
     async function init() {
       checkNetwork().then(setIsOnline);
@@ -112,6 +146,14 @@ export default function App() {
       setHistory(hist);
       setFavorites(favs);
       loadThumbnails([...hist, ...favs]);
+
+      // Check if app was opened via a PDF intent (cold start)
+      const initialUrl = await Linking.getInitialURL();
+      if (initialUrl) {
+        setIsAppReady(true);
+        await openFromIntentUri(initialUrl);
+        return;
+      }
 
       const session = await getLastSession();
       if (session?.uri) {
@@ -140,7 +182,13 @@ export default function App() {
       setIsAppReady(true);
     }
     init();
-  }, []);
+
+    // Handle PDF intents when app is already running (warm start)
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      if (url) openFromIntentUri(url);
+    });
+    return () => subscription.remove();
+  }, [openFromIntentUri]);
 
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
