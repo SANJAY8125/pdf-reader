@@ -302,27 +302,8 @@ const buildHtml = () => `
         pinchFinalScale = currentDist / pinchStartDist;
         const clampedScale = Math.max(MIN_ZOOM / pinchStartZoom, Math.min(MAX_ZOOM / pinchStartZoom, pinchFinalScale));
 
-        const ww = document.documentElement.clientWidth || window.innerWidth || 400;
-        const wh = window.innerHeight || document.documentElement.clientHeight || 800;
-
-        const currentExpectedPageWidth = pinchStartPageWidth * clampedScale;
-        const currentExpectedContainerWidth = Math.max(ww, pinchStartContainerWidth * clampedScale);
-        const currentExpectedOffsetLeft = (currentExpectedContainerWidth - currentExpectedPageWidth) / 2;
-
-        const scaledOffsetX = pinchAnchorOffsetX * clampedScale;
-        const targetScrollX = currentExpectedOffsetLeft + scaledOffsetX - pinchCurrentMidX;
-        const maxScrollX = Math.max(0, currentExpectedContainerWidth - ww);
-        const clampedScrollX = Math.max(0, Math.min(maxScrollX, targetScrollX));
-
-        const currentExpectedOffsetTop = pinchStartOffsetTop * clampedScale;
-        const scaledOffsetY = pinchAnchorOffsetWithinPage * clampedScale;
-        const targetScrollY = currentExpectedOffsetTop + scaledOffsetY - pinchCurrentMidY;
-        const currentExpectedScrollHeight = pinchStartScrollHeight * clampedScale;
-        const maxScrollY = Math.max(0, currentExpectedScrollHeight - wh);
-        const clampedScrollY = Math.max(0, Math.min(maxScrollY, targetScrollY));
-
-        const tx = currentExpectedOffsetLeft - clampedScrollX + pinchScrollXAtStart - (pinchStartOffsetLeft * clampedScale);
-        const ty = pinchScrollYAtStart - clampedScrollY;
+        const tx = - (pinchScrollXAtStart + pinchScreenMidX) * clampedScale + pinchCurrentMidX + pinchScrollXAtStart;
+        const ty = - (pinchScrollYAtStart + pinchScreenMidY) * clampedScale + pinchCurrentMidY + pinchScrollYAtStart;
 
         container.style.transformOrigin = '0px 0px';
         container.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(' + clampedScale + ')';

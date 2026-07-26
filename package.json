@@ -18,6 +18,7 @@
     "expo-constants": "~18.0.13",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.23",
+    "expo-navigation-bar": "~5.0.10",
     "expo-screen-orientation": "~9.0.9",
     "expo-status-bar": "~3.0.9",
     "lucide-react-native": "^1.7.0",

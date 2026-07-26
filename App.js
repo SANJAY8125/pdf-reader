@@ -20,6 +20,7 @@ import {
   getLastSession, setLastSession
 } from './src/storage';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import * as NavigationBar from 'expo-navigation-bar';
 
 const SCREEN_HOME = 'home';
 const SCREEN_READER = 'reader';
@@ -140,6 +141,12 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
+      if (Platform.OS === 'android') {
+        try {
+          await NavigationBar.setVisibilityAsync('hidden');
+          await NavigationBar.setBehaviorAsync('overlay-swipe');
+        } catch (e) {}
+      }
       checkNetwork().then(setIsOnline);
       const hist = await getHistory();
       const favs = await getFavorites();
