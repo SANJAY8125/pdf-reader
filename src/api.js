@@ -20,11 +20,7 @@ const MAX_CACHE_SIZE = 100; // Limit AsyncStorage cache items
 const getDictionary = async () => {
   if (memoryDictionary) return memoryDictionary;
   try {
-    const asset = Asset.fromModule(require('../assets/dictionary.data'));
-    await asset.downloadAsync();
-    const uri = asset.localUri || asset.uri;
-    const raw = await FileSystem.readAsStringAsync(uri);
-    memoryDictionary = JSON.parse(raw);
+    memoryDictionary = require('../assets/dictionary.json');
     return memoryDictionary;
   } catch (err) {
     console.error("Dictionary load error:", err);
@@ -260,7 +256,7 @@ Surrounding Context: "${trimmedContext}"`;
   const makeRequest = async (retries) => {
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${GEMINI_API_KEY}`,
         {
           method: 'POST',
           headers: {
