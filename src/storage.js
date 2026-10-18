@@ -24,10 +24,12 @@ async function writeJSON(path, data) {
 }
 
 export const getHistory = async () => {
-  return (await readJSON(HISTORY_FILE)) || [];
+  const data = (await readJSON(HISTORY_FILE)) || [];
+  return data.filter(item => item?.uri && !item.uri.includes('8081') && !item.uri.startsWith('exp://'));
 };
 
 export const saveToHistory = async (pdfObj) => {
+  if (!pdfObj?.uri || pdfObj.uri.includes('8081') || pdfObj.uri.startsWith('exp://')) return;
   const history = await getHistory();
   const idx = history.findIndex(item => item.uri === pdfObj.uri);
   const entry = { ...pdfObj, lastAccessed: Date.now() };
@@ -46,10 +48,12 @@ export const removeFromHistory = async (uri) => {
 };
 
 export const getFavorites = async () => {
-  return (await readJSON(FAVORITES_FILE)) || [];
+  const data = (await readJSON(FAVORITES_FILE)) || [];
+  return data.filter(item => item?.uri && !item.uri.includes('8081') && !item.uri.startsWith('exp://'));
 };
 
 export const addToFavorites = async (pdfObj) => {
+  if (!pdfObj?.uri || pdfObj.uri.includes('8081') || pdfObj.uri.startsWith('exp://')) return;
   const favs = await getFavorites();
   const exists = favs.find(item => item.uri === pdfObj.uri);
   if (!exists) {
@@ -86,11 +90,16 @@ export const getThumbnailPath = (uri) => {
 };
 
 export const getLastSession = async () => {
-  return await readJSON(SESSION_FILE);
+  const session = await readJSON(SESSION_FILE);
+  if (session?.uri && (session.uri.includes('8081') || session.uri.startsWith('exp://'))) {
+    await setLastSession(null);
+    return null;
+  }
+  return session;
 };
 
 export const setLastSession = async (sessionData) => {
-  if (!sessionData) {
+  if (!sessionData || sessionData.uri?.includes('8081') || sessionData.uri?.startsWith('exp://')) {
     try { await FileSystem.deleteAsync(SESSION_FILE, { idempotent: true }); } catch {}
   } else {
     await writeJSON(SESSION_FILE, sessionData);

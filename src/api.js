@@ -1,5 +1,4 @@
 import NetInfo from '@react-native-community/netinfo';
-import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,7 +9,6 @@ console.log('GEMINI KEY present:', !!GEMINI_API_KEY, 'length:', GEMINI_API_KEY?.
 // Memory caches
 let dictCacheMemory = null;
 let aiCacheMemory = null;
-let memoryDictionary = null; // Lazy loaded offline dictionary
 
 const DICT_CACHE_KEY = '@dict_cache_v2';
 const AI_CACHE_KEY = '@ai_explanations_cache';
@@ -18,14 +16,7 @@ const MAX_CACHE_SIZE = 100; // Limit AsyncStorage cache items
 
 // Dictionary loader
 const getDictionary = async () => {
-  if (memoryDictionary) return memoryDictionary;
-  try {
-    memoryDictionary = require('../assets/dictionary.json');
-    return memoryDictionary;
-  } catch (err) {
-    console.error("Dictionary load error:", err);
-    return null;
-  }
+  return null;
 };
 
 // Cache init

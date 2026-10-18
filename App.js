@@ -10,7 +10,19 @@ import { StatusBar } from 'expo-status-bar';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
-import { BookOpen, Brain, WifiOff, X, ChevronLeft, Plus, Clock, Moon, Sun, Smartphone, Monitor, Star, MoreVertical } from 'lucide-react-native';
+import BookOpen from 'lucide-react-native/icons/book-open';
+import Brain from 'lucide-react-native/icons/brain';
+import WifiOff from 'lucide-react-native/icons/wifi-off';
+import X from 'lucide-react-native/icons/x';
+import ChevronLeft from 'lucide-react-native/icons/chevron-left';
+import Plus from 'lucide-react-native/icons/plus';
+import Clock from 'lucide-react-native/icons/clock';
+import Moon from 'lucide-react-native/icons/moon';
+import Sun from 'lucide-react-native/icons/sun';
+import Smartphone from 'lucide-react-native/icons/smartphone';
+import Monitor from 'lucide-react-native/icons/monitor';
+import Star from 'lucide-react-native/icons/star';
+import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import PdfViewer from './src/PdfViewer';
 import { checkNetwork, explainWithAI, lookupWord } from './src/api';
 import {
@@ -106,22 +118,70 @@ export default function App() {
     setThumbnails(prev => ({ ...prev, ...thumbMap }));
   }, []);
 
+  const refreshLists = useCallback(async () => {
+    const hist = await getHistory();
+    const favs = await getFavorites();
+    setHistory(hist);
+    setFavorites(favs);
+    loadThumbnails([...hist, ...favs]);
+  }, [loadThumbnails]);
+
+  const openFile = useCallback(async (entry) => {
+    const fileEntry = {
+      uri: entry.uri,
+      name: entry.name,
+      initialPage: entry.lastPage || 1,
+      startScrollY: entry.scrollY || 0,
+      fileType: entry.fileType || 'pdf',
+    };
+    setActivePdf(fileEntry);
+    setCurrentPage(fileEntry.initialPage);
+    setCurrentScrollY(fileEntry.startScrollY);
+    setTotalPages(entry.totalPages || 0);
+    setScreen(SCREEN_READER);
+    setShowHeader(false);
+    try {
+      await ScreenOrientation.unlockAsync();
+    } catch (e) {}
+    await setLastSession({
+      uri: entry.uri,
+      name: entry.name,
+      lastPage: fileEntry.initialPage,
+      totalPages: entry.totalPages || 0,
+      scrollY: fileEntry.startScrollY,
+      fileType: fileEntry.fileType,
+    });
+  }, []);
+
+  // Helper to verify if a URL is a real document intent
+  const isValidDocumentUri = (url) => {
+    if (!url || typeof url !== 'string') return false;
+    if (/^exp(s)?:\/\//i.test(url)) return false;
+    if (/^https?:\/\/(localhost|127\.|192\.|10\.|172\.)/i.test(url) && !/\.(pdf|docx|doc)(\?.*)?$/i.test(url)) return false;
+    return url.startsWith('content://') || url.startsWith('file://') || /\.(pdf|docx|doc)(\?.*)?$/i.test(url);
+  };
+
   // Helper: open a PDF from a content:// or file:// URI received via intent
   const openFromIntentUri = useCallback(async (url) => {
-    if (!url) return;
+    if (!isValidDocumentUri(url)) return;
     try {
+      if (url.startsWith('file://')) {
+        const info = await FileSystem.getInfoAsync(url).catch(() => null);
+        if (!info?.exists) return;
+      }
       // Copy to permanent app storage so the URI survives
       const fileName = url.split('/').pop()?.split('?')[0] || 'shared.pdf';
       const safeName = decodeURIComponent(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
       const permanentDir = FileSystem.documentDirectory + 'pdfs/';
       await FileSystem.makeDirectoryAsync(permanentDir, { intermediates: true });
       const permanentUri = permanentDir + safeName;
+      let finalUri = url;
       try {
         await FileSystem.copyAsync({ from: url, to: permanentUri });
+        finalUri = permanentUri;
       } catch (e) {
         // If copy fails use original uri
       }
-      const finalUri = permanentUri;
       const isDocx = safeName.toLowerCase().endsWith('.docx') || safeName.toLowerCase().endsWith('.doc');
       const pdfEntry = {
         uri: finalUri,
@@ -154,16 +214,16 @@ export default function App() {
       setFavorites(favs);
       loadThumbnails([...hist, ...favs]);
 
-      // Check if app was opened via a PDF intent (cold start)
+      // Check if app was opened via a document intent (cold start)
       const initialUrl = await Linking.getInitialURL();
-      if (initialUrl) {
+      if (isValidDocumentUri(initialUrl)) {
         setIsAppReady(true);
         await openFromIntentUri(initialUrl);
         return;
       }
 
       const session = await getLastSession();
-      if (session?.uri) {
+      if (session?.uri && isValidDocumentUri(session.uri)) {
         try {
           const info = await FileSystem.getInfoAsync(session.uri);
           if (info.exists) {
@@ -192,10 +252,10 @@ export default function App() {
 
     // Handle PDF intents when app is already running (warm start)
     const subscription = Linking.addEventListener('url', ({ url }) => {
-      if (url) openFromIntentUri(url);
+      if (isValidDocumentUri(url)) openFromIntentUri(url);
     });
     return () => subscription.remove();
-  }, [openFromIntentUri]);
+  }, [openFromIntentUri, loadThumbnails]);
 
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -206,36 +266,16 @@ export default function App() {
     return () => handler.remove();
   }, [screen, menuVisible]);
 
-  const refreshLists = useCallback(async () => {
-    const hist = await getHistory();
-    const favs = await getFavorites();
-    setHistory(hist);
-    setFavorites(favs);
-    loadThumbnails([...hist, ...favs]);
-  }, [loadThumbnails]);
-
-  const openFile = useCallback(async (entry) => {
-    const fileEntry = {
-      uri: entry.uri,
-      name: entry.name,
-      initialPage: entry.lastPage || 1,
-      startScrollY: entry.scrollY || 0,
-      fileType: entry.fileType || 'pdf',
-    };
-    setActivePdf(fileEntry);
-    setCurrentPage(fileEntry.initialPage);
-    setCurrentScrollY(fileEntry.startScrollY);
-    setTotalPages(entry.totalPages || 0);
-    setScreen(SCREEN_READER);
-    setShowHeader(false);
-    await setLastSession({
-      uri: entry.uri,
-      name: entry.name,
-      lastPage: fileEntry.initialPage,
-      totalPages: entry.totalPages || 0,
-      scrollY: fileEntry.startScrollY,
-      fileType: fileEntry.fileType,
+  useEffect(() => {
+    const sub = ScreenOrientation.addOrientationChangeListener((event) => {
+      const o = event.orientationInfo.orientation;
+      const landscape = (
+        o === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+        o === ScreenOrientation.Orientation.LANDSCAPE_RIGHT
+      );
+      setIsLandscape(landscape);
     });
+    return () => ScreenOrientation.removeOrientationChangeListener(sub);
   }, []);
 
   const goHome = useCallback(async () => {
